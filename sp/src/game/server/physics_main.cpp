@@ -7,14 +7,12 @@
 
 
 #include "cbase.h"
-#ifdef _WIN32
+#ifdef _WIN32 && _MSC_VER != 1929
 #include "typeinfo.h"
 // BUGBUG: typeinfo stomps some of the warning settings (in yvals.h)
 #pragma warning(disable:4244)
-#elif POSIX
-#include <typeinfo>
 #else
-#error "need typeinfo defined"
+#include <typeinfo>
 #endif
 
 #include "player.h"
