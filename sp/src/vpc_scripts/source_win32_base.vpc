@@ -26,7 +26,9 @@ $Configuration
 		$MultiProcessorCompilation "True"
 
 		// warning C4316: object allocated on the heap may not be aligned 16
-		$DisableSpecificWarnings	"$BASE;4316" [$VS2013]
+		// warning C4838: conversion requires a narrowing conversion
+		// warning C4456-4459: variable shadowing. TODO: fix those!
+		$DisableSpecificWarnings	"$BASE;4316;4838;4456;4457;4458;4459" [$VS2013]
 
 		// Having lots of warnings makes it harder to notice new, and possibly
 		// important warnings, both on buildbot and in the output window. Lots
