@@ -1,3 +1,6 @@
+# This is mostly taken from source sdk 2013 community edition
+# https://github.com/Nbc66/source-sdk-2013-ce/blob/master/.github/workflows/SP_windows.yml
+
 name: windows build
 on: workflow_dispatch
 
@@ -21,7 +24,7 @@ jobs:
         run: cd sp/src;./creategameprojects.bat
 
       - name: Build project
-        run: cd sp/src;devenv sdk2013ce.sln /Build Release
+        run: cd sp/src;devenv games.sln /Build Release
 
       - name: Copy hl2 libraries
         shell: bash
