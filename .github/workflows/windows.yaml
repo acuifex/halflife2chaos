@@ -1,0 +1,32 @@
+name: windows build
+on: workflow_dispatch
+
+jobs:
+  hl2chaos:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Configure dependencies
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Create project
+        run: cd sp/src;creategameprojects.bat
+
+      - name: Build project
+        run: cd sp/src;devenv sdk2013ce.sln /Build Release
+
+      - name: Copy hl2 libraries
+        shell: bash
+        run: mkdir -p sourcemods/hl2chaos/bin; cp sp/game/mod_hl2/bin/{client,server}.dll sourcemods/hl2chaos/bin
+
+      - name: Copy episodic libraries
+        shell: bash
+        run: mkdir -p sourcemods/ep1chaos/bin; cp sp/game/mod_episodic/bin/{client,server}.dll sourcemods/ep1chaos/bin; cp -R sourcemods/ep1chaos/bin sourcemods/ep2chaos
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: hl2c
+          path: sourcemods
