@@ -11,8 +11,8 @@ jobs:
       - name: Configure dependencies
         uses: ilammy/msvc-dev-cmd@v1
 
-      - name: Create project
-        run: cd sp/src;creategameprojects.bat
+      - name: Create project files
+        run: cd sp/src;./creategameprojects.bat
 
       - name: Build project
         run: cd sp/src;devenv sdk2013ce.sln /Build Release
