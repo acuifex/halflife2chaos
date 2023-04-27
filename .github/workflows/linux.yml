@@ -1,0 +1,33 @@
+name: linux build
+on: workflow_dispatch
+
+jobs:
+  hl2chaos:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+      
+      - name: Install multilib with cache
+        uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+            packages: gcc-multilib g++-multilib
+            version: 1.0
+
+      - name: Create project files
+        run: sp/src/creategameprojects
+
+      - name: Build project
+        run: cd ./sp/src; make -f games.mak
+
+      - name: Copy hl2 libraries
+        run: mkdir -p sourcemods/hl2chaos/bin; cp sp/game/mod_hl2/bin/{client,server}.so sourcemods/hl2chaos/bin
+
+      - name: Copy episodic libraries
+        run: mkdir -p sourcemods/ep1chaos/bin; cp sp/game/mod_episodic/bin/{client,server}.so sourcemods/ep1chaos/bin; cp -R sourcemods/ep1chaos/bin sourcemods/ep2chaos
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: hl2c_linux
+          path: sourcemods
