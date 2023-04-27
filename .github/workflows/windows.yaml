@@ -11,8 +11,13 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
+      - name: Choco
+        run: choco install microsoft-build-tools-2013
+
       - name: Configure dependencies
         uses: ilammy/msvc-dev-cmd@v1
+        with:
+          vsversion: 2013
 
       - name: Configure registry
         shell: powershell
