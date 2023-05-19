@@ -82,24 +82,16 @@ class CHL2_Player : public CBasePlayer
 {
 public:
 	DECLARE_CLASS(CHL2_Player, CBasePlayer);
-	void ResetVotes();
-	int PickEffect(int iWeightSum);
-	void StartGivenEffect(int nID);
-	void StopGivenEffect(int nID);
 	void MaintainEvils();
-	void PopulateEffects();
 	void StartGame();//called after loads of all kinds
-	template<class T = CChaosEffect> void CreateEffect(int nEffect, string_t strHudName, int nContext, float flDurationMult, int iWeight);
 	bool EffectOrGroupAlreadyActive(int iEffect);
-	//we actually do want to remember what effects are present at the moment of a save so that we may eliminate them upon reloading if needed
-	int m_iActiveEffects[64];
+
 	//HACK: the chaos HUD does not appear on its own after loading a save. it must be done at some time after the screen has begun updating(?),
 	//and Activate() is too early, but PreThink() is fine, so we will have to remember to restart the HUD.
 	//I'd rather find a function that respresents precisely when it becomes ok to call the HUD functions.
 	bool m_bRestartHUD;
 	virtual void			Event_PreSaveGameLoaded(char const *pSaveName, bool bInGame);
 	virtual void		InputInsideTransition(inputdata_t &inputdata);
-	void		DoChaosHUDBar();
 	void		DoChaosHUDText();
 	void		ForceUnstuck();
 	Vector		RotatedOffset(Vector vecOffset, bool bNoVertical);
