@@ -91,10 +91,6 @@ enum Effect_T
 	NUM_EFFECTS
 };
 
-//effect contexts
-#define EC_NONE				0
-
-
 enum
 {
 	SPAWNTYPE_EYELEVEL_REGULAR,
@@ -124,8 +120,21 @@ public:
 	bool CheckEffectContext();
 	bool DoRestorationAbort();
 
+	string_t m_strName;
+
+	// delay thinking for x seconds. NOTE: if not delayed in think, it will fire again next tick.
+	// TODO: make -1 never think?
+	float m_flThinkDelay;
+
+	ConVar* m_pTimeScaleCVar;
+	float m_flTimeRem; // 0-1 scale
+
+	ConVar* m_pMaxWeightCVar;
 	int m_iCurrentWeight;
 	int m_iStrikes;
+
+	int m_iExclude[NUM_EFFECTS];
+	int m_iExcludeCount = 0;
 	// DECLARE_SIMPLE_DATADESC();
 };
 
@@ -233,7 +242,7 @@ CBaseEntity *RetrieveStoredEnt(CChaosStoredEnt *pStoredEnt, bool bPersist);
 
 
 extern bool						g_bGoBackLevel;
-extern int							g_iGroups[MAX_GROUPS][MAX_EFFECTS_IN_GROUP];
+extern bool						g_bGroupsMade;
 
 #define DEFINE_EFFECT_CONSTRUCTOR(classname, parent) \
 	classname(int EffectID, string_t Name, ConVar* WeightCVar, ConVar* TimeScaleCVar = nullptr) \

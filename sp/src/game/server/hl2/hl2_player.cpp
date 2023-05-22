@@ -412,48 +412,25 @@ CON_COMMAND(cc_generate, "")
 
 CON_COMMAND_F(chaos_group, "Creates a chaos group.", FCVAR_SERVER_CAN_EXECUTE)
 {
-	if (args.ArgC() > 1)
-	{
-		/*
-		bool bFullOnGroups = true;
-		for (int i = 0; i < MAX_EFFECTS_IN_GROUP; i++)
-		{
-			if (g_iGroups[i][0] == 0)
-			{
-				Msg("Making group %i\n", i);
-				if (atoi(args[MAX_EFFECTS_IN_GROUP + 1]))
-					Msg("Desired group exceeds group size limit\n");
-				bFullOnGroups = false;
-				for (int j = 1; j < MAX_EFFECTS_IN_GROUP + 1; j++)
-				{
-					if (!atoi(args[j]))
-						break;
-					Msg("Adding effect %i to group %i\n", , i);
-					g_iGroups[i][j - 1] = atoi(args[j]);
-				}
-				break;
-			}
-		}
-		if (bFullOnGroups)
-			Msg("Could not create group, no more groups can be made\n");
-		*/
-		for (int i = 1; atoi(args[i]); i++)
-		{
-			for (int j = 1; atoi(args[j]); j++)
-			{
-				int iAddMe = atoi(args[j]);
-				int iToMe = atoi(args[i]);
-				if (iAddMe == iToMe)//dont add an effect to its own exclude list because why
-					continue;
-				Msg("Added %s to effect %s's exclusion list in slot %i\n", STRING(g_chaosController.m_effects[iAddMe]->m_strGeneralName), STRING(g_chaosController.m_effects[iToMe]->m_strGeneralName), g_chaosController.m_effects[iToMe]->m_iExcludeCount);
-				g_chaosController.m_effects[iToMe]->m_iExclude[g_chaosController.m_effects[iToMe]->m_iExcludeCount] = iAddMe;
-				g_chaosController.m_effects[iToMe]->m_iExcludeCount++;
-			}
-		}
-	}
-	else
+	if (args.ArgC() < 2)
 	{
 		Msg("Specify numbers to assign to group\n");
+		return;
+	}
+	for (int i = 1; i < args.ArgC(); i++)
+	{
+		int iAddMe = atoi(args[i]);
+		if (iAddMe >= NUM_EFFECTS)
+			continue;
+		for (int j = 1; j < args.ArgC(); j++)
+		{
+			int iToMe = atoi(args[j]);
+			if (iAddMe == iToMe || iToMe >= NUM_EFFECTS)//dont add an effect to its own exclude list because why
+				continue;
+			Msg("Added %s to effect %s's exclusion list in slot %i\n", STRING(g_chaosController.m_effects[iAddMe]->m_strName), STRING(g_chaosController.m_effects[iToMe]->m_strName), g_chaosController.m_effects[iToMe]->m_iExcludeCount);
+			g_chaosController.m_effects[iToMe]->m_iExclude[g_chaosController.m_effects[iToMe]->m_iExcludeCount] = iAddMe;
+			g_chaosController.m_effects[iToMe]->m_iExcludeCount++;
+		}
 	}
 }
 CON_COMMAND(getunstuck, "try to get unstuck right now")
@@ -3167,14 +3144,12 @@ void CHL2_Player::Event_Killed( const CTakeDamageInfo &info )
 
 	//assign strikes to effects if possible
 	//for (int i = 0; m_iActiveEffects.Size() >= i + 1; i++)
-	// for (int i = 0; i < MAX_ACTIVE_EFFECTS; i++)
-	// {
-	// 	if (!m_iActiveEffects[i])
-	// 		continue;
-	// 	CChaosEffect *pEffect = g_ChaosEffects[m_iActiveEffects[i]];
-	// 	if (pEffect->CheckStrike(info))
-	// 		pEffect->m_iStrikes++;
-	// }
+	for (int i = 0; i < g_chaosController.m_activeEffects.Count(); i++)
+	{
+		CChaosEffect *pEffect = g_chaosController.m_effects[g_chaosController.m_activeEffects[i]];
+		if (pEffect->CheckStrike(info))
+			pEffect->m_iStrikes++;
+	}
 }
 
 //-----------------------------------------------------------------------------
