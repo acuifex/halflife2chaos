@@ -174,9 +174,64 @@ CChaosEffect::CChaosEffect(int EffectID, string_t Name, ConVar* WeightCVar, ConV
 	m_iCurrentWeight = m_pMaxWeightCVar->GetInt();
 }
 
-float CChaosEffect::GetSecondsRemaining() {
+float CChaosEffect::GetSecondsRemaining()
+{
 	float effect_time_scale = m_pTimeScaleCVar == nullptr ? 1.0f : m_pTimeScaleCVar->GetFloat();
 	return chaos_effect_time.GetFloat() * effect_time_scale * m_flTimeRem;
+}
+void CChaosEffect::SetNextThink(float delay)
+{
+	m_flThinkDelay = delay;
+}
+
+bool CChaosEffect::IterUsableVehicles(bool bFindOnly, bool bFindBoat, bool bFindBuggy)
+{
+	bool bFoundSomething = false;
+	//there may be more than one useable car in a map cause chaos is chaotic
+	//iterate on boats then cars
+	CPropVehicleDriveable *pVehicle = NULL;
+	if (bFindBoat)
+		pVehicle = (CPropVehicleDriveable *)gEntList.FindEntityByClassname(NULL, "prop_vehicle_airboat");
+	if (!pVehicle && bFindBuggy)
+	{
+		pVehicle = (CPropVehicleDriveable *)gEntList.FindEntityByClassname(NULL, "prop_vehicle_jeep");
+		bFindBoat = false;
+	}
+	while (pVehicle)
+	{
+		//if iterating on cars, check model because some APCs use prop_vehicle_jeep
+		if (!bFindBoat && bFindBuggy)
+		{
+			CPropJeep *pJeep = static_cast<CPropJeep *>(pVehicle);
+			if (pJeep->m_bJeep || pJeep->m_bJalopy)
+			{
+				if (!bFindOnly)
+					DoOnVehicles(pVehicle);
+				bFoundSomething = true;
+				if (bFindOnly)
+					return true;
+			}
+		}
+		else
+		{
+			if (!bFindOnly)
+				DoOnVehicles(pVehicle);
+			bFoundSomething = true;
+			if (bFindOnly)
+				return true;
+		}
+		//iterate on boats then cars
+		if (bFindBoat)
+		{
+			pVehicle = (CPropVehicleDriveable *)gEntList.FindEntityByClassname(pVehicle, "prop_vehicle_airboat");
+			if (!pVehicle)
+				bFindBoat = false;
+		}
+		//in the case that we just finished iterating on the last boat, pVehicle is NULL so it should be fine to pass into FindEntityByClassname
+		if (!bFindBoat)
+			pVehicle = (CPropVehicleDriveable *)gEntList.FindEntityByClassname(pVehicle, "prop_vehicle_jeep");
+	}
+	return bFoundSomething;
 }
 
 // TODO: reimplement me!

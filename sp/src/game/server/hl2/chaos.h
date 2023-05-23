@@ -4,30 +4,31 @@
 
 #include "cbase.h"
 #include "utlpair.h"
+#include "vehicle_jeep.h"
 
 #define MAX_ACTIVE_EFFECTS 64
 #define MAX_EFFECTS_IN_GROUP 32
 enum Effect_T
 {
 	EFFECT_ERROR,
-	// EFFECT_ZEROG,
-	// EFFECT_SUPERG,
-	// EFFECT_LOWG,
-	// EFFECT_INVERTG,
-	// EFFECT_PHYS_PAUSE,
-	// EFFECT_PHYS_FAST,
-	// EFFECT_PHYS_SLOW,
-	// EFFECT_PULL_TO_PLAYER,
-	// EFFECT_PUSH_FROM_PLAYER,
-	// EFFECT_NO_MOVEMENT,
-	// EFFECT_SUPER_MOVEMENT,
-	// EFFECT_LOCK_VEHICLE,
-	// EFFECT_NPC_HATE,
-	// EFFECT_NPC_LIKE,
-	// EFFECT_NPC_NEUTRAL,
-	// EFFECT_NPC_FEAR,
-	// EFFECT_TELEPORT_RANDOM,
-	// EFFECT_SPAWN_VEHICLE,
+	EFFECT_ZEROG,
+	EFFECT_SUPERG,
+	EFFECT_LOWG,
+	EFFECT_INVERTG,
+	EFFECT_PHYS_PAUSE,
+	EFFECT_PHYS_FAST,
+	EFFECT_PHYS_SLOW,
+	EFFECT_PULL_TO_PLAYER,
+	EFFECT_PUSH_FROM_PLAYER,
+	EFFECT_NO_MOVEMENT,
+	EFFECT_SUPER_MOVEMENT,
+	EFFECT_LOCK_VEHICLE,
+	EFFECT_NPC_HATE,
+	EFFECT_NPC_LIKE,
+	EFFECT_NPC_NEUTRAL,
+	EFFECT_NPC_FEAR,
+	EFFECT_TELEPORT_RANDOM,
+	EFFECT_SPAWN_VEHICLE,
 	// EFFECT_SPAWN_NPC,
 	// EFFECT_SWIM_IN_AIR,
 	// EFFECT_ONLY_DRAW_WORLD,
@@ -116,6 +117,11 @@ public:
 	virtual void LevelTransition(){};
 	virtual void RestoreEffect(){};
 
+	// TODO: this looks like an ugly hack and it should go away
+	virtual void DoOnVehicles(CPropVehicleDriveable *pVehicle){};
+	bool IterUsableVehicles(bool bFindOnly, bool bFindBoat = true, bool bFindBuggy = true);
+
+	void SetNextThink(float delay);
 	float GetSecondsRemaining();
 	bool CheckEffectContext();
 	bool DoRestorationAbort();
