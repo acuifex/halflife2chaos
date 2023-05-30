@@ -3,6 +3,7 @@
 #include "cbase.h"
 #include "hl2_player.h"
 #include "movevars_shared.h"
+#include "dt_utlvector_send.h"
 
 // memdbgon must be the last include file in a .cpp file!!! according to the government
 #include "tier0/memdbgon.h"
@@ -15,8 +16,18 @@
 //DEFINE_FIELD(m_flTimeRem, FIELD_FLOAT),
 //END_DATADESC()
 
+BEGIN_SEND_TABLE_NOBASE( CChaosEffect, DT_ChaosEffect )
+	SendPropString( SENDINFO( m_strName ) ),
+	SendPropFloat( SENDINFO( m_flTimeRem ) ),
+END_SEND_TABLE()
+
 BEGIN_SEND_TABLE_NOBASE( CChaosController, DT_ChaosController )
 	SendPropFloat( SENDINFO( m_flNextEffectRem ) ),
+	SendPropUtlVector(
+		SENDINFO_UTLVECTOR( m_activeEffects ),
+		MAX_ACTIVE_EFFECTS,
+		SendPropDataTable( NULL, 0, &REFERENCE_SEND_TABLE( DT_ChaosEffect ), SendProxy_DataTablePtrToDataTable )
+	)
 END_SEND_TABLE()
 
 
@@ -86,7 +97,7 @@ CON_COMMAND(chaos_print, "print all effects for debugging")
 {
 	for (int i = 1; i < NUM_EFFECTS; i++)
 	{
-		Msg("%i: %s %s\n", i, STRING(g_chaosController.m_effects[i]->m_strName), 
+		Msg("%i: %s %s\n", i, g_chaosController.m_effects[i]->GetName(), 
 			g_chaosController.IsEffectActive(i) ? "ACTIVE" : "");
 	}
 }
@@ -107,7 +118,7 @@ CON_COMMAND(chaos_test_rng, "Simulate N runs of effect choosing")
 	}
 	for (int k = 0; k < NUM_EFFECTS; k++)
 	{
-		Msg("%i: %s picked %i times\n", k, STRING(g_chaosController.m_effects[k]->m_strName), iPicks[k]);
+		Msg("%i: %s picked %i times\n", k, g_chaosController.m_effects[k]->GetName(), iPicks[k]);
 	}
 }
 
@@ -126,7 +137,7 @@ CON_COMMAND(chaos_vote_internal_poll, "used by an external client. returns vote 
 	for (int i = 0; i < g_chaosController.m_VoteOptions.Count(); ++i)
 	{
 		int effectID = g_chaosController.m_VoteOptions[i].first;
-		ConMsg(";%s", STRING(g_chaosController.m_effects[effectID]->m_strName));
+		ConMsg(";%s", g_chaosController.m_effects[effectID]->GetName());
 	}
 }
 CON_COMMAND(chaos_vote_internal_set, "used by an external client. sets current votes")
@@ -151,7 +162,7 @@ CON_COMMAND(chaos_vote_debug, "prints info about the votes")
 		int effectID = g_chaosController.m_VoteOptions[i].first;
 		Msg("%i: %s %d\n", 
 			i, 
-			STRING(g_chaosController.m_effects[effectID]->m_strName), 
+			g_chaosController.m_effects[effectID]->GetName(), 
 			g_chaosController.m_VoteOptions[i].second);
 	}
 }
@@ -195,11 +206,13 @@ CON_COMMAND(chaos_restart, "restarts map and resets stuff like sv_gravity. execu
 	g_chaosController.m_activeEffects.RemoveAll();
 }
 
-CChaosEffect::CChaosEffect(int EffectID, string_t Name, ConVar* WeightCVar, ConVar* TimeScaleCVar) 
-: m_strName(Name), m_pMaxWeightCVar(WeightCVar), m_pTimeScaleCVar(TimeScaleCVar)
+CChaosEffect::CChaosEffect(int EffectID, const char* Name, ConVar* WeightCVar, ConVar* TimeScaleCVar) 
+: m_pMaxWeightCVar(WeightCVar), m_pTimeScaleCVar(TimeScaleCVar)
 {
 	g_chaosController.m_effects[EffectID] = this;
 	m_iCurrentWeight = m_pMaxWeightCVar->GetInt();
+
+	SetName(Name);
 }
 
 float CChaosEffect::GetSecondsRemaining()
@@ -207,9 +220,18 @@ float CChaosEffect::GetSecondsRemaining()
 	float effect_time_scale = m_pTimeScaleCVar == nullptr ? 1.0f : m_pTimeScaleCVar->GetFloat();
 	return chaos_effect_time.GetFloat() * effect_time_scale * m_flTimeRem;
 }
+
 void CChaosEffect::SetNextThink(float delay)
 {
 	m_flThinkDelay = delay;
+}
+
+const char* CChaosEffect::GetName() {
+	return m_strName.Get();
+}
+
+void CChaosEffect::SetName(const char* Name) {
+	Q_strncpy( m_strName.GetForModify(), Name, MAX_EFFECT_NAME );
 }
 
 bool CChaosEffect::IterUsableVehicles(bool bFindOnly, bool bFindBoat, bool bFindBuggy)
@@ -333,7 +355,7 @@ int CChaosController::GetWeightSum()
 	{
 		CChaosEffect* e = m_effects[i];
 		if (chaos_print_rng.GetBool()) 
-			Msg("i %i, %s %i += %i\n", i, STRING(e->m_strName), iWeightSum, e->m_iCurrentWeight);
+			Msg("i %i, %s %i += %i\n", i, e->GetName(), iWeightSum, e->m_iCurrentWeight);
 		iWeightSum += e->m_iCurrentWeight;
 	}
 	return iWeightSum;
@@ -377,7 +399,7 @@ int CChaosController::PickEffect(int iWeightSum)
 		//start at 1 so ERROR doesn't get picked
 		for (int i = 1; i < NUM_EFFECTS; i++)
 		{
-			if (chaos_print_rng.GetBool()) Msg("i %i, %s %i <= %i\n", i, STRING(m_effects[i]->m_strName), nRandom, m_effects[i]->m_iCurrentWeight);
+			if (chaos_print_rng.GetBool()) Msg("i %i, %s %i <= %i\n", i, m_effects[i]->GetName(), nRandom, m_effects[i]->m_iCurrentWeight);
 			if (nRandom <= m_effects[i]->m_iCurrentWeight)
 			{
 				CChaosEffect *candEffect = m_effects[i];
@@ -386,12 +408,12 @@ int CChaosController::PickEffect(int iWeightSum)
 				if (bGoodActiveness && candEffect->CanBeChosen())
 				{
 					Assert(i != EFFECT_ERROR);
-					if (chaos_print_rng.GetBool()) Msg("Chose effect i %i %s starting number %i\n", i, STRING(m_effects[i]->m_strName), nRememberRandom);
+					if (chaos_print_rng.GetBool()) Msg("Chose effect i %i %s starting number %i\n", i, m_effects[i]->GetName(), nRememberRandom);
 					return i;
 				}
 				else
 				{
-					if (chaos_print_rng.GetBool()) Msg("Breaking for loop i %i %s starting number %i\n", i, STRING(m_effects[i]->m_strName), nRememberRandom);
+					if (chaos_print_rng.GetBool()) Msg("Breaking for loop i %i %s starting number %i\n", i, m_effects[i]->GetName(), nRememberRandom);
 					break;//break here or else we just go to the next available effect down
 				}
 			}
@@ -402,7 +424,7 @@ int CChaosController::PickEffect(int iWeightSum)
 
 bool CChaosController::IsEffectActive(int EffectID)
 {
-	return m_activeEffects.HasElement(EffectID);
+	return m_activeEffects.HasElement(m_effects[EffectID]);
 }
 
 void CChaosController::StartGivenEffect(int EffectID)
@@ -410,20 +432,26 @@ void CChaosController::StartGivenEffect(int EffectID)
 	Assert(EffectID != EFFECT_ERROR);
 	m_flNextEffectRem = chaos_effect_interval.GetFloat();
 	CChaosEffect* e = m_effects[EffectID];
-	Msg("Effect %s\n", STRING(e->m_strName));
+	Msg("Effect %s\n", e->GetName());
 	e->m_flTimeRem = 1.0f;
 	e->m_iStrikes = 0;
 	e->m_flThinkDelay = 0.0f; // let the effect immediately think because why not
 	e->StartEffect();
-	m_activeEffects.AddToTail(EffectID);
+	m_activeEffects.AddToTail(e);
 }
 
 void CChaosController::StopGivenEffect(int EffectID)
 {
 	//currently need to NOT do this check so that we can abort now-inactive effects on reload
-	m_effects[EffectID]->StopEffect();
+	StopGivenEffect(m_effects[EffectID]);
+}
 
-	m_activeEffects.FindAndRemove(EffectID);
+void CChaosController::StopGivenEffect(CChaosEffect* Effect)
+{
+	//currently need to NOT do this check so that we can abort now-inactive effects on reload
+	Effect->StopEffect();
+
+	m_activeEffects.FindAndRemove(Effect);
 }
 
 void CChaosController::ResetVotes() 
@@ -533,8 +561,7 @@ void CChaosController::FrameUpdatePreEntityThink()
 	}
 	for (int i = 0; i < m_activeEffects.Count(); i++)
 	{
-		int effectID = m_activeEffects[i];
-		CChaosEffect* effect = m_effects[effectID];
+		CChaosEffect* effect = m_activeEffects[i];
 		if (!pHL2Player->pl.deadflag) //don't progress timer when dead to avoid confusion
 		{
 			float effect_time_scale = effect->m_pTimeScaleCVar == nullptr ? 1.0f : effect->m_pTimeScaleCVar->GetFloat();
@@ -549,11 +576,9 @@ void CChaosController::FrameUpdatePreEntityThink()
 		}
 		if (effect->m_flTimeRem <= 0 && !pHL2Player->pl.deadflag)//stop effects that are expiring, unless dead cause that's cheating
 		{
-			StopGivenEffect(effectID);
+			StopGivenEffect(effect);
 		}
 	}
-	// TODO: this should be on the client side communicating with the chaos controller on the server
-	pHL2Player->DoChaosHUDText();
 	// TODO: this was being run every second
 	// pHL2Player->MaintainEvils(); // TODO: this should be moved
 }
@@ -565,16 +590,16 @@ void CChaosController::LevelInitPostEntity()
 		//chaos_strike_max strikes, yer out
 		for (int i = 0; i < m_activeEffects.Count(); i++)
 		{
-			CChaosEffect *pEffect = m_effects[m_activeEffects[i]];
+			CChaosEffect *pEffect = m_activeEffects[i];
 			if (pEffect->m_iStrikes >= chaos_strike_max.GetInt())
 			{
-				Warning("Effect %s reached strike %i and was aborted\n", STRING(pEffect->m_strName), pEffect->m_iStrikes);
+				Warning("Effect %s reached strike %i and was aborted\n", pEffect->GetName(), pEffect->m_iStrikes);
 				StopGivenEffect(i);
 			}
 		}
 		for (int i = 0; i < m_activeEffects.Count(); ++i)
 		{
-			CChaosEffect *pEffect = m_effects[m_activeEffects[i]];
+			CChaosEffect *pEffect = m_activeEffects[i];
 			pEffect->RestoreEffect();
 		}
 
@@ -582,7 +607,7 @@ void CChaosController::LevelInitPostEntity()
 	if (gpGlobals->eLoadType == MapLoad_Transition) {
 		for (int i = 0; i < m_activeEffects.Count(); ++i)
 		{
-			CChaosEffect *pEffect = m_effects[m_activeEffects[i]];
+			CChaosEffect *pEffect = m_activeEffects[i];
 			pEffect->m_flThinkDelay = 0.0f; // TODO: this was in the old code. do we still need it?
 			pEffect->LevelTransition();
 		}

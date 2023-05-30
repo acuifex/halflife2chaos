@@ -424,7 +424,7 @@ CON_COMMAND_F(chaos_group, "Creates a chaos group.", FCVAR_SERVER_CAN_EXECUTE)
 			int iToMe = atoi(args[j]);
 			if (iAddMe == iToMe || iToMe >= NUM_EFFECTS)//dont add an effect to its own exclude list because why
 				continue;
-			Msg("Added %s to effect %s's exclusion list in slot %i\n", STRING(g_chaosController.m_effects[iAddMe]->m_strName), STRING(g_chaosController.m_effects[iToMe]->m_strName), g_chaosController.m_effects[iToMe]->m_iExcludeCount);
+			Msg("Added %s to effect %s's exclusion list in slot %i\n", g_chaosController.m_effects[iAddMe]->GetName(), g_chaosController.m_effects[iToMe]->GetName(), g_chaosController.m_effects[iToMe]->m_iExcludeCount);
 			g_chaosController.m_effects[iToMe]->m_iExclude[g_chaosController.m_effects[iToMe]->m_iExcludeCount] = iAddMe;
 			g_chaosController.m_effects[iToMe]->m_iExcludeCount++;
 		}
@@ -740,7 +740,6 @@ BEGIN_DATADESC( CHL2_Player )
 	//DEFINE_FIELD(m_flNextEffectRem, FIELD_FLOAT),
 	//DEFINE_FIELD(m_flFirstEffectRem, FIELD_FLOAT),
 	//DEFINE_FIELD(m_flRemAtLoad, FIELD_FLOAT),
-	DEFINE_FIELD(m_bRestartHUD, FIELD_BOOLEAN),
 	//DEFINE_FIELD(m_iChaosSpawnCount, FIELD_INTEGER),
 
 	//DEFINE_UTLVECTOR(m_iTerminated, FIELD_INTEGER),
@@ -1438,7 +1437,6 @@ void CHL2_Player::RemoveDeadEnts()
 void CHL2_Player::Activate( void )
 {
 	StartGame();
-	m_bRestartHUD = true;
 	//STOP TRYING TO DO MAPLOAD_NEWGAME STUFF HERE DUMMY. GO TO SPAWN()
 	if (gpGlobals->eLoadType == MapLoad_LoadGame)
 	{
@@ -1746,7 +1744,6 @@ void CHL2_Player::Spawn(void)
 	StartGame();
 	if (gpGlobals->eLoadType == MapLoad_NewGame)
 	{
-		m_bRestartHUD = true;
 		if (g_bGoBackLevel)
 			ReplaceEffects();
 		//for HL2 Chaos, you always want to have a save to load
@@ -3134,8 +3131,6 @@ void CHL2_Player::Event_Killed( const CTakeDamageInfo &info )
 {
 	BaseClass::Event_Killed( info );
 
-	//freeze HUD text
-	DoChaosHUDText();
 	FirePlayerProxyOutput( "PlayerDied", variant_t(), this, this );
 	NotifyScriptsOfDeath();
 
@@ -3143,7 +3138,7 @@ void CHL2_Player::Event_Killed( const CTakeDamageInfo &info )
 	//for (int i = 0; m_iActiveEffects.Size() >= i + 1; i++)
 	for (int i = 0; i < g_chaosController.m_activeEffects.Count(); i++)
 	{
-		CChaosEffect *pEffect = g_chaosController.m_effects[g_chaosController.m_activeEffects[i]];
+		CChaosEffect *pEffect = g_chaosController.m_activeEffects[i];
 		if (pEffect->CheckStrike(info))
 			pEffect->m_iStrikes++;
 	}
@@ -4598,79 +4593,6 @@ void CLogicPlayerProxy::InputSetLocatorTargetEntity( inputdata_t &inputdata )
 }
 
 ConVar groupcheck_debug("groupcheck_debug", "0");
-
-ConVar chaos_text_x("chaos_text_x", "0.85");
-ConVar chaos_text_y("chaos_text_y", "0");
-ConVar chaos_text_spacing("chaos_text_spacing", "0.1");
-ConVar chaos_text_r("chaos_text_r", "255");
-ConVar chaos_text_g("chaos_text_g", "220");
-ConVar chaos_text_b("chaos_text_b", "0");
-ConVar chaos_text_a("chaos_text_a", "255");
-//ConVar chaos_text_additive("chaos_text_additive", "1");
-ConVar chaos_textfade_r("chaos_textfade_r", "255");
-ConVar chaos_textfade_g("chaos_textfade_g", "48");
-ConVar chaos_textfade_b("chaos_textfade_b", "0");
-ConVar chaos_textfade_a("chaos_textfade_a", "255");
-ConVar chaos_alwaysShowEffectTime("chaos_alwaysShowEffectTime", "0");
-
-void PrintEffectName(int i, int iHidden, bool bDead, CChaosEffect *pEffect, bool bHidden)
-{
-	//fade older effects
-	float scale = clamp(1 - pEffect->m_flTimeRem, 0, 1);;
-	int iR = chaos_text_r.GetInt() + (scale * (chaos_textfade_r.GetInt() - chaos_text_r.GetInt()));
-	int iG = chaos_text_g.GetInt() + (scale * (chaos_textfade_g.GetInt() - chaos_text_g.GetInt()));
-	int iB = chaos_text_b.GetInt() + (scale * (chaos_textfade_b.GetInt() - chaos_text_b.GetInt()));
-	int iA = chaos_text_a.GetInt() + (scale * (chaos_textfade_a.GetInt() - chaos_text_a.GetInt()));
-
-	hudtextparms_t textParams;
-	textParams.channel = (i);// -iHidden);
-	textParams.r1 = iR;
-	textParams.g1 = iG;
-	textParams.b1 = iB;
-	textParams.a1 = iA;
-	textParams.x = chaos_text_x.GetFloat();
-	textParams.y = chaos_text_y.GetFloat() + chaos_text_spacing.GetFloat() * (i - iHidden);
-	textParams.effect = 0;
-	textParams.fadeinTime = 0;
-	textParams.fadeoutTime = 0;
-	textParams.holdTime = bDead ? 100 : gpGlobals->interval_per_tick + 0.1;//don't progress timer when dead to avoid confusion
-	textParams.fxTime = 0;
-	textParams.drawtype = 1;
-	if (!pEffect->m_pTimeScaleCVar && !chaos_alwaysShowEffectTime.GetBool())
-	{
-		UTIL_HudMessage(UTIL_GetLocalPlayer(), textParams, bHidden ? " " : STRING(pEffect->m_strName));
-	}
-	else
-	{
-		char szMessage[2048];
-		int iTime = ceil(pEffect->GetSecondsRemaining());
-		Q_snprintf(szMessage, sizeof(szMessage), "%s (%i)", STRING(pEffect->m_strName), iTime);
-		UTIL_HudMessage(UTIL_GetLocalPlayer(), textParams, bHidden ? " " : szMessage);
-	}
-}
-void CHL2_Player::DoChaosHUDText()
-{
-	int iHidden = 0;
-	//Msg("CHL2_Player::DoChaosHUDText\n");
-	//for (int i = 0; m_iActiveEffects.Size() >= i + 1; i++)
-	for (int i = 0; i < g_chaosController.m_activeEffects.Count(); i++)
-	{
-		// if (!m_iActiveEffects[i])
-		// {
-		// 	iHidden++;
-		// 	continue;
-		// }
-		CChaosEffect *pEffect = g_chaosController.m_effects[g_chaosController.m_activeEffects[i]];
-		//Msg("i %i Effect %s ID %i iHidden %i\n", i, STRING(pEffect->m_strHudName), pEffect->m_nID, iHidden);
-		// if ((pEffect->m_bActive && pEffect->m_flTimeRem <= 0) || !pEffect->m_bActive)
-		// {
-		// 	iHidden++;
-		// 	PrintEffectName(i, iHidden, pl.deadflag, pEffect, true);
-		// 	continue;
-		// }
-		PrintEffectName(i, iHidden, pl.deadflag, pEffect, false);
-	}
-}
 
 //make evil NPCs stay evil
 //can't do in the effect's MaintainEffect() because that only lasts 80 seconds

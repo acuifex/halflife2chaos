@@ -86,13 +86,8 @@ public:
 	void StartGame();//called after loads of all kinds
 	bool EffectOrGroupAlreadyActive(int iEffect);
 
-	//HACK: the chaos HUD does not appear on its own after loading a save. it must be done at some time after the screen has begun updating(?),
-	//and Activate() is too early, but PreThink() is fine, so we will have to remember to restart the HUD.
-	//I'd rather find a function that respresents precisely when it becomes ok to call the HUD functions.
-	bool m_bRestartHUD;
 	virtual void			Event_PreSaveGameLoaded(char const *pSaveName, bool bInGame);
 	virtual void		InputInsideTransition(inputdata_t &inputdata);
-	void		DoChaosHUDText();
 	void		ForceUnstuck();
 	Vector		RotatedOffset(Vector vecOffset, bool bNoVertical);
 	void		ReplaceEffects();

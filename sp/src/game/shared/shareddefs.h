@@ -945,4 +945,7 @@ enum
 };
 #endif // TF_DLL || TF_CLIENT_DLL
 
+#define MAX_ACTIVE_EFFECTS 32
+#define MAX_EFFECT_NAME 64
+
 #endif // SHAREDDEFS_H

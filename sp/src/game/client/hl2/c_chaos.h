@@ -15,6 +15,18 @@ public:
 	static C_ChaosControllerProxy *s_pChaosControllerProxy;
 };
 
+class C_ChaosEffect
+{
+public:
+	DECLARE_CLASS_NOBASE( C_ChaosEffect );
+	DECLARE_CLIENTCLASS_NOBASE();
+
+	float GetTimeLeftFraction() { return Clamp(m_flTimeRem, 0.f, 1.f); }
+
+	char m_strName[MAX_EFFECT_NAME];
+	float m_flTimeRem;
+};
+
 class C_ChaosController
 {
 public:
@@ -34,6 +46,7 @@ public:
 		C_ChaosControllerProxy::NotifyNetworkStateChanged();
 	}
 
+	CUtlVector<C_ChaosEffect> m_activeEffects;
 	float m_flNextEffectRem;
 };
 

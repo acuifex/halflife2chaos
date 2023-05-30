@@ -29,7 +29,7 @@ END_EFFECT()
 class CEGravitySet : public CChaosEffect
 {
 public:
-	CEGravitySet(int EffectID, string_t Name, int Gravity, ConVar* WeightCVar, ConVar* TimeScaleCVar = nullptr)
+	CEGravitySet(int EffectID, const char* Name, int Gravity, ConVar* WeightCVar, ConVar* TimeScaleCVar = nullptr)
 	: CChaosEffect(EffectID, Name, WeightCVar, TimeScaleCVar) 
 	{
 		m_gravity = Gravity;
@@ -53,7 +53,7 @@ public:
 #define CREATE_GRAVITY_EFFECT(effectid, gravity, name, cvar) \
 	ConVar chaos_prob_##cvar("chaos_prob_" #cvar, "100"); \
 	ConVar chaos_time_##cvar("chaos_time_" #cvar, "1"); \
-	CEGravitySet effect_##cvar(effectid, MAKE_STRING(name), gravity, &chaos_prob_##cvar, &chaos_time_##cvar);
+	CEGravitySet effect_##cvar(effectid, name, gravity, &chaos_prob_##cvar, &chaos_time_##cvar);
 
 CREATE_GRAVITY_EFFECT(EFFECT_ZEROG, 0, "Zero Gravity", zerog);
 CREATE_GRAVITY_EFFECT(EFFECT_SUPERG, 1800, "Super Gravity", superg);
@@ -75,7 +75,7 @@ END_EFFECT()
 class CEPhysSpeedSet : public CChaosEffect
 {
 public:
-	CEPhysSpeedSet(int EffectID, string_t Name, float Scale, ConVar* WeightCVar, ConVar* TimeScaleCVar = nullptr)
+	CEPhysSpeedSet(int EffectID, const char* Name, float Scale, ConVar* WeightCVar, ConVar* TimeScaleCVar = nullptr)
 	: CChaosEffect(EffectID, Name, WeightCVar, TimeScaleCVar) 
 	{
 		m_scale = Scale;
@@ -94,7 +94,7 @@ public:
 #define CREATE_PHYSICS_SPEED_EFFECT(effectid, scale, name, cvar) \
 	ConVar chaos_prob_##cvar("chaos_prob_" #cvar, "100"); \
 	ConVar chaos_time_##cvar("chaos_time_" #cvar, "1"); \
-	CEPhysSpeedSet effect_##cvar(effectid, MAKE_STRING(name), scale, &chaos_prob_##cvar, &chaos_time_##cvar);
+	CEPhysSpeedSet effect_##cvar(effectid, name, scale, &chaos_prob_##cvar, &chaos_time_##cvar);
 
 CREATE_PHYSICS_SPEED_EFFECT(EFFECT_PHYS_PAUSE, 0, "Pause Physics", phys_pause)
 CREATE_PHYSICS_SPEED_EFFECT(EFFECT_PHYS_FAST, 4, "Fast Physics", phys_fast)
@@ -327,7 +327,7 @@ bool IsPlayerAlly(CBaseCombatCharacter *pCharacter)
 class CENPCRels : public CChaosEffect
 {
 public:
-	CENPCRels(int EffectID, string_t Name, int Disposition, ConVar* WeightCVar, ConVar* TimeScaleCVar = nullptr)
+	CENPCRels(int EffectID, const char* Name, int Disposition, ConVar* WeightCVar, ConVar* TimeScaleCVar = nullptr)
 	: CChaosEffect(EffectID, Name, WeightCVar, TimeScaleCVar) 
 	{
 		m_disposition = Disposition;
@@ -437,7 +437,7 @@ public:
 #define CREATE_NPC_RELATION_EFFECT(effectid, disposition, name, cvar) \
 	ConVar chaos_prob_##cvar("chaos_prob_" #cvar, "100"); \
 	ConVar chaos_time_##cvar("chaos_time_" #cvar, "1"); \
-	CENPCRels effect_##cvar(effectid, MAKE_STRING(name), disposition, &chaos_prob_##cvar, &chaos_time_##cvar);
+	CENPCRels effect_##cvar(effectid, name, disposition, &chaos_prob_##cvar, &chaos_time_##cvar);
 
 CREATE_NPC_RELATION_EFFECT(EFFECT_NPC_HATE, D_HT, "World of Hate", npc_hate)
 CREATE_NPC_RELATION_EFFECT(EFFECT_NPC_LIKE, D_LI, "World of Love", npc_like)
@@ -556,7 +556,7 @@ DEFINE_EFFECT_SINGLEFIRE(EFFECT_SPAWN_VEHICLE, "Spawn Random Vehicle", spawn_veh
 			pJalopy->AcceptInput("EnableRadar", pJalopy, pJalopy, sVariant, 0);
 			pJalopy->AcceptInput("EnableRadarDetectEnemies", pJalopy, pJalopy, sVariant, 0);
 			pJalopy->AcceptInput("AddBusterToCargo", pJalopy, pJalopy, sVariant, 0);
-			m_strName = MAKE_STRING("Spawn Jalopy");
+			SetName("Spawn Jalopy");
 		}
 	}
 	if (nRandom == 4)
@@ -619,24 +619,24 @@ DEFINE_EFFECT_SINGLEFIRE(EFFECT_SPAWN_VEHICLE, "Spawn Random Vehicle", spawn_veh
 			//activate crane last so everything works correctly
 			DispatchSpawn(pVehicle);
 			pVehicle->Activate();
-			m_strName = MAKE_STRING("Spawn Crane");
+			SetName("Spawn Crane");
 		}
 	}
 	if (nRandom == 0){
 		ChaosSpawnVehicle("prop_vehicle_jeep", SPAWNTYPE_VEHICLE, "models/buggy.mdl", "jeep", "scripts/vehicles/jeep_test.txt");
-		m_strName = MAKE_STRING("Spawn Buggy");
+		SetName("Spawn Buggy");
 	}
 	if (nRandom == 1){
 		ChaosSpawnVehicle("prop_vehicle_airboat", SPAWNTYPE_VEHICLE, "models/airboat.mdl", "airboat", "scripts/vehicles/airboat.txt");
-		m_strName = MAKE_STRING("Spawn Airboat");
+		SetName("Spawn Airboat");
 	}
 	if (nRandom == 2){
 		ChaosSpawnVehicle("prop_vehicle_prisoner_pod", SPAWNTYPE_EYELEVEL_SPECIAL, "models/vehicles/prisoner_pod_inner.mdl", "pod", "scripts/vehicles/prisoner_pod.txt");
-		m_strName = MAKE_STRING("Spawn Pod");
+		SetName("Spawn Pod");
 	}
 	if (nRandom == 3){
 		ChaosSpawnVehicle("prop_vehicle_apc", SPAWNTYPE_VEHICLE, "models/combine_apc.mdl", "apc", "scripts/vehicles/apc_npc.txt");
-		m_strName = MAKE_STRING("Spawn APC");
+		SetName("Spawn APC");
 	}
 }
 
@@ -688,9 +688,9 @@ DEFINE_EFFECT_SINGLEFIRE(EFFECT_BEER_BOTTLE, "Beer I owed ya", beer_bottle)
 	pPhys->EnableDrag(false);
 	pPhys->SetMass(i * 10);
 	if (i > 40)
-		m_strName = MAKE_STRING("BEER I OWED YA");
+		SetName("BEER I OWED YA");
 	else
-		m_strName = MAKE_STRING("Beer I owed ya"); // don't forget to change the text back, since effect object is persistent
+		SetName("Beer I owed ya"); // don't forget to change the text back, since effect object is persistent
 }
 
 // comments bellow are for quick reference while i'm reimplementing everything

@@ -6,8 +6,6 @@
 #include "utlpair.h"
 #include "vehicle_jeep.h"
 
-#define MAX_ACTIVE_EFFECTS 64
-#define MAX_EFFECTS_IN_GROUP 32
 enum Effect_T
 {
 	EFFECT_ERROR,
@@ -103,11 +101,26 @@ enum
 	SPAWNTYPE_UNDERGROUND,
 };
 
+// idea stolen from gamerules
+// TODO: code duplication. this probably should be moved into shared
+class CChaosControllerProxy : public CBaseEntity
+{
+public:
+	DECLARE_CLASS(CChaosControllerProxy, CBaseEntity);
+	DECLARE_SERVERCLASS();
+
+	static void NotifyNetworkStateChanged();
+	int UpdateTransmitState();
+	static CChaosControllerProxy *s_pChaosControllerProxy;
+};
+
 class CChaosEffect
 {
 public:
 	DECLARE_CLASS_NOBASE(CChaosEffect);
-	CChaosEffect(int EffectID, string_t Name, ConVar* WeightCVar, ConVar* TimeScaleCVar = nullptr);
+	DECLARE_SERVERCLASS_NOBASE();
+
+	CChaosEffect(int EffectID, const char* Name, ConVar* WeightCVar, ConVar* TimeScaleCVar = nullptr);
 	virtual void StartEffect(){};
 	virtual void StopEffect(){};
 	virtual void Think(){};
@@ -126,14 +139,31 @@ public:
 	bool CheckEffectContext();
 	bool DoRestorationAbort();
 
-	string_t m_strName;
+	const char* GetName();
+	void SetName(const char* Name);
+
+	// should be calling CChaosController but ehhhhhhhhhhhhhhh
+	// This function is here for our CNetworkVars.
+	inline void NetworkStateChanged()
+	{
+		// Forward the call to the entity that will send the data.
+		CChaosControllerProxy::NotifyNetworkStateChanged();
+	}
+
+	inline void NetworkStateChanged( void *pVar )
+	{
+		// Forward the call to the entity that will send the data.
+		CChaosControllerProxy::NotifyNetworkStateChanged();
+	}
+
+	CNetworkString( m_strName, MAX_EFFECT_NAME );
 
 	// delay thinking for x seconds. NOTE: if not delayed in think, it will fire again next tick.
 	// TODO: make -1 never think?
 	float m_flThinkDelay;
 
 	ConVar* m_pTimeScaleCVar;
-	float m_flTimeRem; // 0-1 scale
+	CNetworkVar( float, m_flTimeRem ); // 0-1 scale
 
 	ConVar* m_pMaxWeightCVar;
 	int m_iCurrentWeight;
@@ -142,19 +172,6 @@ public:
 	int m_iExclude[NUM_EFFECTS];
 	int m_iExcludeCount = 0;
 	// DECLARE_SIMPLE_DATADESC();
-};
-
-// idea stolen from gamerules
-// TODO: code duplication. this probably should be moved into shared
-class CChaosControllerProxy : public CBaseEntity
-{
-public:
-	DECLARE_CLASS(CChaosControllerProxy, CBaseEntity);
-	DECLARE_SERVERCLASS();
-
-	static void NotifyNetworkStateChanged();
-	int UpdateTransmitState();
-	static CChaosControllerProxy *s_pChaosControllerProxy;
 };
 
 class CChaosController : public CAutoGameSystemPerFrame
@@ -183,6 +200,7 @@ public:
 	bool IsEffectActive(int EffectID);
 	void StartGivenEffect(int EffectID);
 	void StopGivenEffect(int EffectID);
+	void StopGivenEffect(CChaosEffect* Effect);
 
 	// This function is here for our CNetworkVars.
 	inline void NetworkStateChanged()
@@ -199,7 +217,7 @@ public:
 
 	CNetworkVar( float, m_flNextEffectRem );
 	CChaosEffect* m_effects[NUM_EFFECTS];
-	CUtlVector<int> m_activeEffects;
+	CUtlVector<CChaosEffect*> m_activeEffects;
 
 	int m_iVoteNumber;
 	// effect:votes
@@ -278,7 +296,7 @@ extern bool						g_bGoBackLevel;
 extern bool						g_bGroupsMade;
 
 #define DEFINE_EFFECT_CONSTRUCTOR(classname, parent) \
-	classname(int EffectID, string_t Name, ConVar* WeightCVar, ConVar* TimeScaleCVar = nullptr) \
+	classname(int EffectID, const char* Name, ConVar* WeightCVar, ConVar* TimeScaleCVar = nullptr) \
 	: parent(EffectID, Name, WeightCVar, TimeScaleCVar) {}
 
 // TODO: steal get_timescale_cvar stuff or something from BEGIN_EFFECT
@@ -303,7 +321,7 @@ extern bool						g_bGroupsMade;
 				return nullptr; \
 			} \
 		} \
-		string_t localname = MAKE_STRING(name); \
+		const char* localname = name; \
 		int localeffectid = effectid; \
 		CChaosEffect *EffectCreate(); \
 		CChaosEffect *g_EffectHolder = EffectCreate(); \

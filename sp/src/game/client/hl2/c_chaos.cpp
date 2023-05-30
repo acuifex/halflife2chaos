@@ -1,9 +1,17 @@
 #include "c_chaos.h"
 
+#include "dt_utlvector_recv.h"
+
 C_ChaosController g_CC;
+
+BEGIN_RECV_TABLE_NOBASE( C_ChaosEffect, DT_ChaosEffect )
+	RecvPropString( RECVINFO( m_strName ) ),
+	RecvPropFloat( RECVINFO( m_flTimeRem ) ),
+END_RECV_TABLE()
 
 BEGIN_RECV_TABLE_NOBASE( C_ChaosController, DT_ChaosController )
 	RecvPropFloat( RECVINFO( m_flNextEffectRem ) ),
+	RecvPropUtlVectorDataTable( m_activeEffects, MAX_ACTIVE_EFFECTS, DT_ChaosEffect ),
 END_RECV_TABLE()
 
 
@@ -34,7 +42,12 @@ int C_ChaosControllerProxy::UpdateTransmitState()
 }
 
 
-CON_COMMAND(chaos_network_test, "print clientside timer")
+CON_COMMAND(chaos_network_test, "print clientside variables")
 {
-	Msg("%.2f\n", g_CC.m_flNextEffectRem);
+	Msg("timer: %.2f\n", g_CC.m_flNextEffectRem);
+	for (int i = 0; i < g_CC.m_activeEffects.Count(); ++i)
+	{
+		Msg("%s: %.2f\n", g_CC.m_activeEffects[i].m_strName, g_CC.m_activeEffects[i].m_flTimeRem);
+		// Msg("%d: %d\n", i, g_CC.m_activeEffects[i]);
+	}
 }
