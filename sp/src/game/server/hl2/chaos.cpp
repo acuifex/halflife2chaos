@@ -15,16 +15,44 @@
 //DEFINE_FIELD(m_flTimeRem, FIELD_FLOAT),
 //END_DATADESC()
 
+BEGIN_SEND_TABLE_NOBASE( CChaosController, DT_ChaosController )
+	SendPropFloat( SENDINFO( m_flNextEffectRem ) ),
+END_SEND_TABLE()
+
+
+LINK_ENTITY_TO_CLASS( chaos_controller, CChaosControllerProxy );
+IMPLEMENT_SERVERCLASS( CChaosControllerProxy, DT_ChaosControllerProxy )
+
+
+void* SendProxy_ChaosController( const SendProp *pProp, const void *pStructBase, const void *pData, CSendProxyRecipients *pRecipients, int objectID )
+{
+	pRecipients->SetAllRecipients();
+	return &g_chaosController;
+}
+CChaosControllerProxy* CChaosControllerProxy::s_pChaosControllerProxy = nullptr;
+
+BEGIN_SEND_TABLE( CChaosControllerProxy, DT_ChaosControllerProxy )
+	SendPropDataTable( "chaos_controller_data", 0, &REFERENCE_SEND_TABLE( DT_ChaosController ), SendProxy_ChaosController )
+END_SEND_TABLE()
+
+
+void CChaosControllerProxy::NotifyNetworkStateChanged()
+{
+	if ( s_pChaosControllerProxy )
+		s_pChaosControllerProxy->NetworkStateChanged();
+}
+int CChaosControllerProxy::UpdateTransmitState()
+{
+	// ALWAYS transmit to all clients.
+	return SetTransmitState( FL_EDICT_ALWAYS );
+}
+
 ConVar chaos("chaos", "0", FCVAR_NONE);
 ConVar chaos_effect_time("chaos_effect_time", "90", FCVAR_NONE, "Standard effect length.");
 ConVar chaos_instant_off("chaos_instant_off", "0", FCVAR_NONE);
 ConVar chaos_print_rng("chaos_print_rng", "0");
 ConVar chaos_vote_enable("chaos_vote_enable", "0");
-ConVar chaos_effect_interval("chaos_effect_interval", "30", FCVAR_NONE, "Time between each effect.");
-ConVar chaos_bar_r("chaos_bar_r", "255");
-ConVar chaos_bar_g("chaos_bar_g", "220");
-ConVar chaos_bar_b("chaos_bar_b", "0");
-ConVar chaos_bar_a("chaos_bar_a", "255");
+ConVar chaos_effect_interval("chaos_effect_interval", "30", FCVAR_REPLICATED, "Time between each effect.");
 ConVar chaos_unstuck_neweffect("chaos_unstuck_neweffect", "1", FCVAR_NONE, "Get the player unstuck every time a new effect starts. may not be wanted by some technical players.");
 
 CChaosController g_chaosController;
@@ -398,23 +426,6 @@ void CChaosController::StopGivenEffect(int EffectID)
 	m_activeEffects.FindAndRemove(EffectID);
 }
 
-// TODO: issue same as DoChaosHUDText
-void DoChaosHUDBar()
-{
-	CBasePlayer *pPlayer = UTIL_GetLocalPlayer();
-	CSingleUserRecipientFilter user(pPlayer);
-	user.MakeReliable();
-	UserMessageBegin(user, "Go");
-	//WRITE_BYTE(0);
-	//For some reason the color data is read in the REVERSE of how it was sent?!
-	WRITE_FLOAT(chaos_bar_a.GetInt());
-	WRITE_FLOAT(chaos_bar_b.GetInt());
-	WRITE_FLOAT(chaos_bar_g.GetInt());
-	WRITE_FLOAT(chaos_bar_r.GetInt());
-	WRITE_FLOAT(chaos_effect_interval.GetFloat());// * cvar->FindVar("host_timescale")->GetFloat());
-	MessageEnd();
-}
-
 void CChaosController::ResetVotes() 
 {
 	m_iVoteNumber++;
@@ -463,25 +474,17 @@ void CChaosController::FrameUpdatePreEntityThink()
 	{
 		return;
 	}
-	static int m_bRestartHUD = true;
 	CBasePlayer *pPlayer = UTIL_GetLocalPlayer();
 	if (!pPlayer) {
 		return; // too early.
 	}
 	CHL2_Player *pHL2Player = dynamic_cast<CHL2_Player*>(pPlayer);
-	assert(pPlayer);
+	assert(pHL2Player);
 	if (chaos.GetBool())
 	{
-		if (m_bRestartHUD)
-		{
-			m_bRestartHUD = false;
-			DoChaosHUDBar();
-		}
 		if (m_activeEffects.Count() == 0 && m_flNextEffectRem <= -1)
 		{
 			m_flNextEffectRem = chaos_effect_interval.GetFloat();
-			DoChaosHUDBar();
-			m_bRestartHUD = true;//Fixes bar not showing when map is loaded if chaos was enabled when no map was "on" at the time. Stupid but works.
 		}
 		if (m_flNextEffectRem <= 0 && !pHL2Player->pl.deadflag)//don't start new effects when dead
 		{
@@ -494,9 +497,7 @@ void CChaosController::FrameUpdatePreEntityThink()
 				nID = GetVoteWinnerEffect();
 
 			RecoverWeights(0.2);
-			//send to HUD
-			DoChaosHUDBar();
-
+			
 			//start effect
 			StartGivenEffect(nID);
 			PunishEffect(nID);
@@ -541,8 +542,6 @@ void CChaosController::FrameUpdatePreEntityThink()
 			if (effect->m_flThinkDelay > 0.0f)
 				effect->m_flThinkDelay -= gpGlobals->interval_per_tick / flTimeScale;
 		}
-		// TODO: this should be on the client side communicating with the chaos controller on the server
-		pHL2Player->DoChaosHUDText();
 		// TODO: we need to figure out how to move this work onto the engine, but this will work for now
 		if (effect->m_flThinkDelay <= 0.0f)
 		{
@@ -553,6 +552,8 @@ void CChaosController::FrameUpdatePreEntityThink()
 			StopGivenEffect(effectID);
 		}
 	}
+	// TODO: this should be on the client side communicating with the chaos controller on the server
+	pHL2Player->DoChaosHUDText();
 	// TODO: this was being run every second
 	// pHL2Player->MaintainEvils(); // TODO: this should be moved
 }

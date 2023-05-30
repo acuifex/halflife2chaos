@@ -144,12 +144,26 @@ public:
 	// DECLARE_SIMPLE_DATADESC();
 };
 
-// TODO: possibly make this communicate with the client? does it need to be a baseentity for that?
-// see vote_controller for reference
+// idea stolen from gamerules
+// TODO: code duplication. this probably should be moved into shared
+class CChaosControllerProxy : public CBaseEntity
+{
+public:
+	DECLARE_CLASS(CChaosControllerProxy, CBaseEntity);
+	DECLARE_SERVERCLASS();
+
+	static void NotifyNetworkStateChanged();
+	int UpdateTransmitState();
+	static CChaosControllerProxy *s_pChaosControllerProxy;
+};
+
 class CChaosController : public CAutoGameSystemPerFrame
 {
 public:
-	DECLARE_CLASS_NOBASE(CChaosController)
+	// DECLARE_CLASS_NOBASE(CChaosController)
+	DECLARE_CLASS_GAMEROOT( CChaosController, CAutoGameSystemPerFrame );
+	DECLARE_SERVERCLASS_NOBASE();
+
 	CChaosController() : CAutoGameSystemPerFrame( "CChaosController" ) {};
 
 	virtual bool Init();
@@ -170,7 +184,20 @@ public:
 	void StartGivenEffect(int EffectID);
 	void StopGivenEffect(int EffectID);
 
-	float m_flNextEffectRem;
+	// This function is here for our CNetworkVars.
+	inline void NetworkStateChanged()
+	{
+		// Forward the call to the entity that will send the data.
+		CChaosControllerProxy::NotifyNetworkStateChanged();
+	}
+
+	inline void NetworkStateChanged( void *pVar )
+	{
+		// Forward the call to the entity that will send the data.
+		CChaosControllerProxy::NotifyNetworkStateChanged();
+	}
+
+	CNetworkVar( float, m_flNextEffectRem );
 	CChaosEffect* m_effects[NUM_EFFECTS];
 	CUtlVector<int> m_activeEffects;
 

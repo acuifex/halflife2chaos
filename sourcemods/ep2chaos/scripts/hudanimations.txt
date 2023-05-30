@@ -820,9 +820,3 @@ event HideVoteBackgrounds
 	Animate		LabelOption4	Alpha	255 Linear	0.0 0.001
 	Animate		LabelOption5	Alpha	255 Linear	0.0 0.001
 }
-
-
-event ChaosBarMove
-{
-	Animate CHudChaosBar	Size		"853 5"	Linear	0.0		30
-}

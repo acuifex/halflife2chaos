@@ -47,59 +47,6 @@ BEGIN_PREDICTION_DATA( C_BaseHLPlayer )
 	DEFINE_PRED_FIELD( m_fIsSprinting, FIELD_BOOLEAN, FTYPEDESC_INSENDTABLE ),
 END_PREDICTION_DATA()
 
-class CHudChaosBar : public CHudElement, public vgui::Panel
-{
-	DECLARE_CLASS_SIMPLE(CHudChaosBar, vgui::Panel);
-
-public:
-	CHudChaosBar(const char *pElementName);
-	virtual void Init(void);
-	//virtual void VidInit(void);
-	//virtual void Reset(void);
-	//virtual void OnThink();
-	void MsgFunc_Go(bf_read &msg);
-	virtual void ProcessInput();
-
-private:
-	float m_flScrollTime = 30;
-	float m_flXPos;
-	//virtual void Paint();
-};
-CHudChaosBar::CHudChaosBar(const char *pElementName) : CHudElement(pElementName), BaseClass(NULL, "CHudChaosBar")
-{
-	vgui::Panel *pParent = g_pClientMode->GetViewport();
-	SetParent(pParent);
-}
-DECLARE_HUDELEMENT(CHudChaosBar);
-DECLARE_HUD_MESSAGE(CHudChaosBar, Go);
-void CHudChaosBar::Init()
-{
-	HOOK_HUD_MESSAGE(CHudChaosBar, Go);
-	//SetSize(1, 1);
-}
-static CUtlSymbolTable g_ScriptSymbols(0, 128, true);
-void CHudChaosBar::MsgFunc_Go(bf_read &msg)
-{
-	SetSize(0, GetTall());
-	SetBgColor(Color(msg.ReadFloat(), msg.ReadFloat(), msg.ReadFloat(), msg.ReadFloat()));
-
-	//Hack bar timing to match convar
-	g_pClientMode->GetViewportAnimationController()->StartAnimationSequence("ChaosBarMove");
-	g_pClientMode->GetViewportAnimationController()->m_ActiveAnimations.Tail().endTime = g_pClientMode->GetViewportAnimationController()->m_ActiveAnimations.Tail().startTime + msg.ReadFloat();//bruh
-	//Msg("start %i\n", g_pClientMode->GetViewportAnimationController()->m_ActiveAnimations.Tail().startTime);
-	//Msg("end %i\n", g_pClientMode->GetViewportAnimationController()->m_ActiveAnimations.Tail().endTime);
-}
-void CHudChaosBar::ProcessInput()
-{
-	//Msg("ProcessInput\n\n\n");
-	//int iWidth, iTall;
-	//GetHudSize(iWidth, iTall);
-	//SetSize(50, 50);
-	//m_flXPos += gpGlobals->frametime * ((float)iWidth / m_flScrollTime);
-	//g_pVGuiSurface->DrawSetColor(255, 255, 255, 255);
-	//SetSize(m_flXPos, 50);
-	//g_pVGuiSurface->ApplyChanges();
-}
 //-----------------------------------------------------------------------------
 // Purpose: Drops player's primary weapon
 //-----------------------------------------------------------------------------
