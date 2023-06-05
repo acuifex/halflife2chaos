@@ -613,3 +613,8 @@ void CChaosController::LevelInitPostEntity()
 		}
 	}
 }
+
+CChaosEffect* GetEffectByID(int effectID)
+{
+	return g_chaosController.m_effects[effectID];
+}

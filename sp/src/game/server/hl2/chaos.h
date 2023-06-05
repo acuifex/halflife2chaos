@@ -27,38 +27,38 @@ enum Effect_T
 	EFFECT_NPC_FEAR,
 	EFFECT_TELEPORT_RANDOM,
 	EFFECT_SPAWN_VEHICLE,
-	// EFFECT_SPAWN_NPC,
-	// EFFECT_SWIM_IN_AIR,
-	// EFFECT_ONLY_DRAW_WORLD,
-	// EFFECT_LOW_DETAIL,
-	// EFFECT_PLAYER_BIG,
-	// EFFECT_PLAYER_SMALL,
-	// EFFECT_NO_MOUSE_HORIZONTAL,
-	// EFFECT_NO_MOUSE_VERTICAL,
-	// EFFECT_SUPER_GRAB,
-	// EFFECT_GIVE_WEAPON,
-	// EFFECT_GIVE_ALL_WEAPONS,
-	// EFFECT_DROP_WEAPONS,
-	// //EFFECT_CROSSBOW_GUNS,//crossbow guns - replace bullets with crossbow bolts. requires moving some code around and i don't wanna deal with it right now
-	// EFFECT_NADE_GUNS,//grenade guns - replace bullets with grenades. same story as crossbow
-	// //rapid weapon fire - that will take a while to do
-	// EFFECT_EARTHQUAKE,
-	// //EFFECT_WINDY,//broken for unknown reasons
-	// EFFECT_420_JOKE,
-	// EFFECT_ZOMBIE_SPAM,
-	// //EFFECT_LOW_FOV,
-	// //EFFECT_HIGH_FOV,
-	// EFFECT_EXPLODE_ON_DEATH,
-	// EFFECT_BULLET_TELEPORT,
-	// EFFECT_CREDITS,
-	// //EFFECT_SANTIAGO,
-	// EFFECT_SUPERHOT,
-	// EFFECT_SUPERCOLD,
-	// EFFECT_BARREL_SHOTGUN,
-	// EFFECT_QUICKCLIP_ON,
-	// EFFECT_QUICKCLIP_OFF,
-	// EFFECT_SOLID_TRIGGERS,
-	// EFFECT_RANDOM_COLORS,
+	EFFECT_SPAWN_NPC,
+	EFFECT_SWIM_IN_AIR,
+	EFFECT_ONLY_DRAW_WORLD,
+	EFFECT_LOW_DETAIL,
+	EFFECT_PLAYER_BIG,
+	EFFECT_PLAYER_SMALL,
+	EFFECT_NO_MOUSE_HORIZONTAL,
+	EFFECT_NO_MOUSE_VERTICAL,
+	EFFECT_SUPER_GRAB,
+	EFFECT_GIVE_WEAPON,
+	EFFECT_GIVE_ALL_WEAPONS,
+	EFFECT_DROP_WEAPONS,
+	//EFFECT_CROSSBOW_GUNS,//crossbow guns - replace bullets with crossbow bolts. requires moving some code around and i don't wanna deal with it right now
+	EFFECT_NADE_GUNS,//grenade guns - replace bullets with grenades. same story as crossbow
+	//rapid weapon fire - that will take a while to do
+	EFFECT_EARTHQUAKE,
+	//EFFECT_WINDY,//broken for unknown reasons
+	EFFECT_FUNNY_NUMBER,
+	EFFECT_ZOMBIE_SPAM,
+	//EFFECT_LOW_FOV,
+	//EFFECT_HIGH_FOV,
+	EFFECT_EXPLODE_ON_DEATH,
+	EFFECT_BULLET_TELEPORT,
+	EFFECT_CREDITS,
+	//EFFECT_SANTIAGO,
+	EFFECT_SUPERHOT,
+	EFFECT_SUPERCOLD,
+	EFFECT_BARREL_SHOTGUN,
+	EFFECT_QUICKCLIP_ON,
+	EFFECT_QUICKCLIP_OFF,
+	EFFECT_SOLID_TRIGGERS,
+	EFFECT_RANDOM_COLORS,
 	EFFECT_BEER_BOTTLE,
 	// EFFECT_EVIL_ALYX,
 	// EFFECT_EVIL_NORIKO,
@@ -133,6 +133,10 @@ public:
 	// TODO: this looks like an ugly hack and it should go away
 	virtual void DoOnVehicles(CPropVehicleDriveable *pVehicle){};
 	bool IterUsableVehicles(bool bFindOnly, bool bFindBoat = true, bool bFindBuggy = true);
+
+	CAI_BaseNPC *ChaosSpawnNPC(const char *className, const char* strActualName, int iSpawnType, const char *strModel, const char *strTargetname, const char *strWeapon, bool bEvil = false);
+
+	bool ChaosSpawnWeapon(const char *className, const char *strActualName, int iCount = 0, const char *strAmmoType = NULL, int iCount2 = 0, const char *strAmmoType2 = NULL);
 
 	void SetNextThink(float delay);
 	float GetSecondsRemaining();
@@ -216,13 +220,15 @@ public:
 	}
 
 	CNetworkVar( float, m_flNextEffectRem );
-	CChaosEffect* m_effects[NUM_EFFECTS];
+	CChaosEffect* m_effects[NUM_EFFECTS]; // TODO: store entity factories instead of effect singletons?
 	CUtlVector<CChaosEffect*> m_activeEffects;
 
 	int m_iVoteNumber;
 	// effect:votes
 	CUtlVector<CUtlPair<int, int>> m_VoteOptions;
 };
+
+CChaosEffect* GetEffectByID(int effectID);
 
 extern CChaosController g_chaosController;
 

@@ -85,13 +85,7 @@
 
 extern ConVar weapon_showproficiency;
 extern ConVar autoaim_max_dist;
-extern ConVar player_use_dist;
-extern ConVar player_throwforce;
 extern ConVar chaos_replace_bullets_with_crossbow;
-extern ConVar chaos_replace_bullets_with_grenades;
-extern ConVar chaos_explode_on_death;
-extern ConVar chaos_bullet_teleport;
-extern ConVar chaos_barrel_shotgun;
 extern ConVar chaos_cant_leave_map;
 extern ConVar r_handbrake_allowed;
 extern ConVar r_vehicleBrakeRate;
@@ -152,21 +146,6 @@ ConVar sv_stickysprint("sv_stickysprint", "0", FCVAR_ARCHIVE | FCVAR_ARCHIVE_XBO
 ConVar chaos_ignore_activeness("chaos_ignore_activeness", "0");
 ConVar chaos_ignore_group("chaos_ignore_group", "0");
 ConVar chaos_ignore_context("chaos_ignore_context", "0");
-
-
-void RandomizeReadiness(CBaseEntity *pNPC)
-{
-	variant_t emptyVariant;
-	float nRandom = random->RandomInt(0, 3);
-	if (nRandom == 0)
-		pNPC->AcceptInput("SetReadinessLow", pNPC, pNPC, emptyVariant, 0);
-	if (nRandom == 1)
-		pNPC->AcceptInput("SetReadinessMedium", pNPC, pNPC, emptyVariant, 0);
-	if (nRandom == 2)
-		pNPC->AcceptInput("SetReadinessHigh", pNPC, pNPC, emptyVariant, 0);
-	if (nRandom == 3)
-		pNPC->AcceptInput("SetReadinessPanic", pNPC, pNPC, emptyVariant, 0);
-}
 
 CChaosStoredEnt *StoreEnt(CBaseEntity *pEnt)
 {

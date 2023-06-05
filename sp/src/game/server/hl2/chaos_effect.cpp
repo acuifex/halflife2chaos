@@ -8,6 +8,8 @@
 #include "ai_network.h"
 #include "ai_node.h"
 #include "hl_gamemovement.h"
+#include "globalstate.h"
+#include "triggers.h"
 
 
 extern ConVar hl2_normspeed;
@@ -15,6 +17,12 @@ extern ConVar hl2_sprintspeed;
 extern ConVar hl2_walkspeed;
 extern ConVar hl2_duckspeed;
 extern ConVar ai_block_damage;
+extern ConVar chaos_replace_bullets_with_grenades;
+extern ConVar player_use_dist;
+extern ConVar player_throwforce;
+extern ConVar chaos_explode_on_death;
+extern ConVar chaos_bullet_teleport;
+extern ConVar chaos_barrel_shotgun;
 
 
 ConVar chaos_pushpull_strength("chaos_pushpull_strength", "0.15", FCVAR_NONE, "Controls strength of repulsive and black hole");
@@ -230,7 +238,7 @@ BEGIN_EFFECT(EFFECT_NO_MOVEMENT, "Stop", no_movement, true)
 		if (g_chaosController.IsEffectActive(EFFECT_SUPER_MOVEMENT))
 		{
 			// EFFECT_SUPER_MOVEMENT is active and will outlast me, restore its effects
-			g_chaosController.m_effects[EFFECT_SUPER_MOVEMENT]->StartEffect();
+			GetEffectByID(EFFECT_SUPER_MOVEMENT)->StartEffect();
 		}
 	}
 
@@ -274,7 +282,7 @@ BEGIN_EFFECT(EFFECT_SUPER_MOVEMENT, "Super Speed", super_movement, true)
 		if (g_chaosController.IsEffectActive(EFFECT_NO_MOVEMENT))
 		{
 			// EFFECT_NO_MOVEMENT is active and will outlast me, restore its effects
-			g_chaosController.m_effects[EFFECT_NO_MOVEMENT]->StartEffect();
+			GetEffectByID(EFFECT_NO_MOVEMENT)->StartEffect();
 		}
 	}
 END_EFFECT()
@@ -639,6 +647,1161 @@ DEFINE_EFFECT_SINGLEFIRE(EFFECT_SPAWN_VEHICLE, "Spawn Random Vehicle", spawn_veh
 		SetName("Spawn APC");
 	}
 }
+
+// TODO: huge ugly function. find a way for it to go away.
+CAI_BaseNPC *CChaosEffect::ChaosSpawnNPC(const char *className, const char* strActualName, int iSpawnType, const char *strModel, const char *strTargetname, const char *strWeapon, bool bEvil)
+{
+	float flDistAway;
+	float flExtraHeight;
+	switch (iSpawnType)
+	{
+	case SPAWNTYPE_EYELEVEL_REGULAR:
+		flDistAway = 128;
+		flExtraHeight = 64;
+		break;
+	case SPAWNTYPE_EYELEVEL_SPECIAL:
+	case SPAWNTYPE_CEILING:
+	case SPAWNTYPE_UNDERGROUND:
+		flDistAway = 128;
+		flExtraHeight = 64;
+		break;
+	case SPAWNTYPE_BIGFLYER:
+		flDistAway = 192;
+		flExtraHeight = 256;
+		break;
+	case SPAWNTYPE_STRIDER:
+		flDistAway = 128;
+		flExtraHeight = 512;
+		break;
+	default:
+		return NULL;
+	}
+	char modDir[MAX_PATH];
+	if (UTIL_GetModDir(modDir, sizeof(modDir)) == false)
+		return NULL;
+	CBasePlayer* pPlayer = UTIL_GetLocalPlayer();
+	//CHL2_Player *pHL2Player = static_cast<CHL2_Player*>(pPlayer);
+	Vector vecForward;
+	AngleVectors(pPlayer->EyeAngles(), &vecForward);
+	vecForward.z = 0;
+	vecForward.NormalizeInPlace();//This will always give back some actual XY numbers because the camera is actually limited to 89 degrees up or down, not 90
+	//then again something weird COULD happen to set the angle to straight 90 up/down, but idk what that would be
+	CAI_BaseNPC *pNPC = (CAI_BaseNPC *)CreateEntityByName(className);
+	if (pNPC)
+	{
+		Vector vecOrigin = pPlayer->GetAbsOrigin() + vecForward * flDistAway + Vector(0, 0, flExtraHeight);
+		if (iSpawnType == SPAWNTYPE_CEILING)//put the NPC on the ceiling
+		{
+			trace_t tr;
+			UTIL_TraceLine(vecOrigin, vecOrigin + Vector(0, 0, 100000), MASK_SOLID, NULL, COLLISION_GROUP_NONE, &tr);
+			vecOrigin = tr.endpos + Vector(0, 0, -2);//move down a bit so barnacle looks right
+		}
+		float flPitch = 0;
+		QAngle aAngles;
+		if (iSpawnType == SPAWNTYPE_UNDERGROUND)//put the NPC in the ground
+		{
+			trace_t tr;
+			UTIL_TraceLine(vecOrigin, vecOrigin - Vector(0, 0, 100000), MASK_SOLID, NULL, COLLISION_GROUP_NONE, &tr);
+			vecOrigin = tr.endpos + Vector(0, 0, 1);//a little above the ground to avoid z fighting
+			Vector xaxis(1.0f, 0.0f, 0.0f);
+			pPlayer->EyeVectors(&xaxis);
+			xaxis = -xaxis;
+			Vector yaxis;
+			CrossProduct(tr.plane.normal, xaxis, yaxis);
+			if (VectorNormalize(yaxis) < 1e-3)
+			{
+				xaxis.Init(0.0f, 0.0f, 1.0f);
+				CrossProduct(tr.plane.normal, xaxis, yaxis);
+				VectorNormalize(yaxis);
+			}
+			CrossProduct(yaxis, tr.plane.normal, xaxis);
+			VectorNormalize(xaxis);
+			VMatrix entToWorld;
+			entToWorld.SetBasisVectors(xaxis, yaxis, tr.plane.normal);
+			MatrixToAngles(entToWorld, aAngles);
+		}
+		else
+		{
+			aAngles = QAngle(flPitch, pPlayer->GetAbsAngles().y - 180, 0);
+		}
+		pNPC->SetAbsOrigin(vecOrigin);
+		pNPC->SetAbsAngles(aAngles);
+		pNPC->m_bEvil = bEvil;
+		if (FStrEq(className, "npc_alyx")) pNPC->KeyValue("ShouldHaveEMP", "1");
+		if (FStrEq(className, "npc_cscanner")) pNPC->KeyValue("ShouldInspect", "1");
+		if (FStrEq(className, "npc_sniper")) pNPC->AddSpawnFlags(65536);
+		if (FStrEq(className, "npc_strider")) pNPC->AddSpawnFlags(65536);
+		if (FStrEq(className, "npc_vortigaunt")) pNPC->KeyValue("ArmorRechargeEnabled", "1");
+		if (FStrEq(className, "npc_apcdriver"))
+		{
+			pNPC->KeyValue("vehicle", "apc");
+			pNPC->KeyValue("parentname", "apc");//once i saw an APC do nothing when it should have. maybe the driver was stuck in the wall and couldn't see, while the APC was teleported with GetUnstuck?
+		}
+		if (FStrEq(className, "npc_antlion"))
+		{
+			if (!Q_strcmp(modDir, "ep2chaos"))
+			{
+				if (random->RandomInt(0, 1) == 1)//cave variant
+					pNPC->AddSpawnFlags(262144);
+			}
+			pNPC->KeyValue("startburrowed", "0");
+		}
+		if (FStrEq(className, "npc_antlionguard"))
+		{
+			if (!Q_strcmp(modDir, "ep2chaos"))
+			{
+				if (random->RandomInt(0, 1) == 1)//cave variant
+				{
+					pNPC->KeyValue("cavernbreed", "1");
+					pNPC->KeyValue("incavern", "1");
+				}
+			}
+			pNPC->KeyValue("startburrowed", "0");
+			pNPC->KeyValue("allowbark", "1");
+			pNPC->KeyValue("shovetargets", "*");
+		}
+		if (FStrEq(className, "npc_citizen"))
+		{
+			pNPC->AddSpawnFlags(65536);//follow player
+			pNPC->AddSpawnFlags(262144);//random head
+			if (random->RandomInt(0, 1) == 1)//medic
+				pNPC->AddSpawnFlags(131072);
+			if (random->RandomInt(0, 1) == 1)//ammo resupplier
+			{
+				float nRandom = random->RandomInt(0, 10);
+				if (nRandom == 0) pNPC->KeyValue("ammosupply", "AR2");
+				if (nRandom == 1) pNPC->KeyValue("ammosupply", "Pistol");
+				if (nRandom == 2) pNPC->KeyValue("ammosupply", "SMG1");
+				if (nRandom == 3) pNPC->KeyValue("ammosupply", "357");
+				if (nRandom == 4) pNPC->KeyValue("ammosupply", "XBowBolt");
+				if (nRandom == 5) pNPC->KeyValue("ammosupply", "Buckshot");
+				if (nRandom == 6) pNPC->KeyValue("ammosupply", "RPG_Round");
+				if (nRandom == 7) pNPC->KeyValue("ammosupply", "SMG1_Grenade");
+				if (nRandom == 8) pNPC->KeyValue("ammosupply", "Grenade");
+				if (nRandom == 9) pNPC->KeyValue("ammosupply", "Battery");
+				if (nRandom == 10) pNPC->KeyValue("ammosupply", "AR2AltFire");
+				pNPC->AddSpawnFlags(524288);
+				pNPC->KeyValue("ammoamount", "100");
+			}
+			int nRandom = random->RandomInt(0, 6);//weapon
+			if (nRandom == 0) pNPC->KeyValue("additionalequipment", "weapon_ar2");
+			if (nRandom == 1) pNPC->KeyValue("additionalequipment", "weapon_citizenpackage");
+			if (nRandom == 2) pNPC->KeyValue("additionalequipment", "weapon_citizensuitcase");
+			if (nRandom == 3) pNPC->KeyValue("additionalequipment", "weapon_crowbar");
+			if (nRandom == 4) pNPC->KeyValue("additionalequipment", "weapon_rpg");
+			if (nRandom == 5) pNPC->KeyValue("additionalequipment", "weapon_shotgun");
+			if (nRandom == 6) pNPC->KeyValue("additionalequipment", "weapon_smg1");
+
+			nRandom = random->RandomInt(0, 3);//clothing
+			if (nRandom == 0) pNPC->KeyValue("citizentype", "0");
+			if (nRandom == 1) pNPC->KeyValue("citizentype", "1");
+			if (nRandom == 2) pNPC->KeyValue("citizentype", "2");
+			if (nRandom == 3) pNPC->KeyValue("citizentype", "3");
+
+			pNPC->KeyValue("expressiontype", "0");
+		}
+		if (FStrEq(className, "npc_combine_s"))
+		{
+			pNPC->KeyValue("NumGrenades", "100");
+			int nRandom = random->RandomInt(0, 2);//model/elite status
+			if (nRandom == 0) pNPC->KeyValue("model", "models/combine_soldier.mdl");
+			if (nRandom == 1) pNPC->KeyValue("model", "models/combine_super_soldier.mdl");
+			if (nRandom == 2) pNPC->KeyValue("model", "models/combine_soldier_prisonguard.mdl");
+
+			nRandom = random->RandomInt(0, 2);//weapon
+			if (nRandom == 0) pNPC->KeyValue("additionalequipment", "weapon_ar2");
+			if (nRandom == 1) pNPC->KeyValue("additionalequipment", "weapon_shotgun");
+			if (nRandom == 2) pNPC->KeyValue("additionalequipment", "weapon_smg1");
+		}
+		if (FStrEq(className, "npc_combinedropship"))
+		{
+			int nRandom = 1;// random->RandomInt(-3, 1);//cargo type. avoid 0 cause that does nothing
+			Msg("crate type %i\n", nRandom);
+			if (nRandom == -3) pNPC->KeyValue("CrateType", "-3");//jeep
+			if (nRandom == -2)//apc
+			{
+				pNPC->KeyValue("CrateType", "-2");
+				ChaosSpawnVehicle("prop_vehicle_apc", SPAWNTYPE_VEHICLE, "models/combine_apc.mdl", "chaos_dropship_apc", "scripts/vehicles/apc_npc.txt");
+				pNPC->KeyValue("APCVehicleName", "chaos_dropship_apc");
+				variant_t emptyVariant;
+				g_EventQueue.AddEvent("combinedropship", "DropAPC", emptyVariant, 1, pNPC, pNPC);
+			}
+			if (nRandom == -1)//strider
+			{
+				pNPC->KeyValue("CrateType", "-1");
+				variant_t emptyVariant;
+				g_EventQueue.AddEvent("combinedropship", "DropStrider", emptyVariant, 1, pNPC, pNPC);
+			}
+			if (nRandom == 0) pNPC->KeyValue("CrateType", "2");//nothing
+			if (nRandom == 1)//soldier crate
+			{
+				pNPC->KeyValue("CrateType", "1");
+				pNPC->KeyValue("GunRange", "2000");
+				//soldiers are spawned in CNPC_CombineDropship::SpawnTroop
+				CBaseEntity *pTarget = CreateEntityByName("info_target");
+				pTarget->KeyValue("targetname", "dropship_target");
+				pTarget->SetAbsOrigin(vecOrigin);
+				pTarget->SetAbsAngles(aAngles);
+				DispatchSpawn(pTarget);
+				pNPC->KeyValue("LandTarget", "dropship_target");
+				variant_t variant;
+				variant.SetInt(6);
+				if (random->RandomInt(0, 1))
+					g_EventQueue.AddEvent("combinedropship", "LandLeaveCrate", variant, 1, pNPC, pNPC);
+				else
+					g_EventQueue.AddEvent("combinedropship", "LandTakeCrate", variant, 1, pNPC, pNPC);
+			}
+		}
+		if (FStrEq(className, "npc_metropolice"))
+		{
+			pNPC->KeyValue("manhacks", "100");
+
+			int nRandom = random->RandomInt(0, 2);//weapon
+			if (nRandom == 0) pNPC->KeyValue("additionalequipment", "weapon_smg1");
+			if (nRandom == 1) pNPC->KeyValue("additionalequipment", "weapon_pistol");
+			if (nRandom == 2) pNPC->KeyValue("additionalequipment", "weapon_stunstick");
+		}
+		if (FStrEq(className, "npc_stalker"))
+		{
+			int nRandom = random->RandomInt(0, 2);
+			if (nRandom == 0) pNPC->KeyValue("BeamPower", "0");
+			if (nRandom == 1) pNPC->KeyValue("BeamPower", "1");
+			if (nRandom == 2) pNPC->KeyValue("BeamPower", "2");
+		}
+		if (FStrEq(className, "npc_turret_ceiling"))
+		{
+			pNPC->SetMaxHealth(700);
+			pNPC->SetHealth(700);
+			pNPC->AddSpawnFlags(32);
+		}
+		if (FStrEq(className, "npc_turret_ground"))
+		{
+			CBaseEntity *pMover = CreateEntityByName("func_movelinear");
+			pMover->SetAbsOrigin(vecOrigin);
+
+			//get a vector for what's "upward" relative to the surface we're on
+			Vector forward, right, up;
+			AngleVectors(aAngles, &forward, &right, &up);
+			//entity wants a QAngle though... so put the direction back to an angle. dumb!
+			QAngle angUp;
+			VectorAngles(up, angUp);
+
+			char buf[512];
+			Q_snprintf(buf, sizeof(buf), "%.10f %.10f %.10f", angUp.x, angUp.y, angUp.z);
+			pMover->KeyValue("movedir", buf);
+			pMover->KeyValue("movedistance", "32");
+			pMover->KeyValue("speed", "40");
+			pMover->KeyValue("startposition", "0");
+			pMover->KeyValue("startsound", "Streetwar.d3_c17_10b_doormove3");
+			pMover->KeyValue("stopsound", "Streetwar.d3_c17_10b_metal_stop1");
+			pMover->KeyValue("targetname", "turret_lift");
+			pMover->KeyValue("OnFullyOpen", "turret_ground,Enable,,0,-1");
+			g_iChaosSpawnCount++; pMover->KeyValue("chaosid", g_iChaosSpawnCount);
+			pNPC->SetAbsOrigin(vecOrigin - (up * 8));//put turret below top part of the cover
+			pNPC->SetAbsAngles(aAngles);
+			pMover->m_bChaosPersist = true;
+			pMover->m_bChaosSpawned = true;
+			DispatchSpawn(pMover);
+			pMover->Activate();
+			CBaseEntity *pProp = CreateEntityByName("prop_dynamic_override");
+			pProp->SetAbsOrigin(vecOrigin);
+			pProp->SetAbsAngles(aAngles);
+			pProp->KeyValue("model", "models/props_c17/turretcover.mdl");
+			pProp->KeyValue("disableshadows", "1");
+			pProp->KeyValue("solid", "6");
+			g_iChaosSpawnCount++; pProp->KeyValue("chaosid", g_iChaosSpawnCount);
+			pProp->m_bChaosPersist = true;
+			pProp->m_bChaosSpawned = true;
+			DispatchSpawn(pProp);
+			pProp->Activate();
+			pNPC->SetParent(pMover);
+			pProp->SetParent(pMover);
+			variant_t sVariant;
+			pMover->AcceptInput("Open", pMover, pMover, sVariant, 0);
+			CBaseEntity *pSound1 = CreateEntityByName("ambient_generic");
+			pSound1->SetAbsOrigin(vecOrigin);
+			pSound1->KeyValue("targetname", "turret_detected_sound");
+			pSound1->KeyValue("message", "Streetwar.d3_c17_10b_alarm1");
+			pSound1->KeyValue("spawnflags", "16");
+			g_iChaosSpawnCount++; pSound1->KeyValue("chaosid", g_iChaosSpawnCount);
+			pSound1->m_bChaosPersist = true;
+			pSound1->m_bChaosSpawned = true;
+			DispatchSpawn(pSound1);
+			pSound1->Activate();
+			g_EventQueue.AddEvent("turret_detected_sound", "PlaySound", sVariant, 0.01, pPlayer, pPlayer);
+			g_EventQueue.AddEvent("turret_detected_sound", "StopSound", sVariant, 1.5, pPlayer, pPlayer);
+			pNPC->KeyValue("OnDeath", "turret_lift,Close,,0,-1");
+		}
+
+		if (!FStrEq(strModel, "_"))
+			pNPC->KeyValue("model", strModel);
+		if (!FStrEq(strWeapon, "_"))
+			pNPC->KeyValue("additionalequipment", strWeapon);
+		pNPC->KeyValue("targetname", strTargetname);
+		pNPC->m_bChaosSpawned = true;
+		pNPC->m_bChaosPersist = true;
+		g_iChaosSpawnCount++; pNPC->CBaseEntity::KeyValue("chaosid", g_iChaosSpawnCount);
+		DispatchSpawn(pNPC);
+		pNPC->Activate();
+		if (iSpawnType != SPAWNTYPE_UNDERGROUND)//taken care of
+			pNPC->Teleport(&vecOrigin, &aAngles, NULL);
+		SetName(strActualName);
+
+		if (iSpawnType != SPAWNTYPE_UNDERGROUND)//put the NPC in the ground
+			pNPC->GetUnstuck(500);
+	}
+	return pNPC;
+}
+
+CBaseEntity *GetEntityWithID(int iChaosID)
+{
+	CBaseEntity *pEnt = gEntList.FirstEnt();
+	while (pEnt)
+	{
+		if (pEnt->m_iChaosID == iChaosID)
+			return pEnt;
+		pEnt = gEntList.NextEnt(pEnt);
+	}
+	return NULL;
+}
+
+BEGIN_EFFECT(EFFECT_SPAWN_NPC, "Spawn Random NPC", spawn_npc, false)
+	void RandomizeReadiness(CBaseEntity *pNPC)
+	{
+		variant_t emptyVariant;
+		float nRandom = random->RandomInt(0, 3);
+		if (nRandom == 0)
+			pNPC->AcceptInput("SetReadinessLow", pNPC, pNPC, emptyVariant, 0);
+		if (nRandom == 1)
+			pNPC->AcceptInput("SetReadinessMedium", pNPC, pNPC, emptyVariant, 0);
+		if (nRandom == 2)
+			pNPC->AcceptInput("SetReadinessHigh", pNPC, pNPC, emptyVariant, 0);
+		if (nRandom == 3)
+			pNPC->AcceptInput("SetReadinessPanic", pNPC, pNPC, emptyVariant, 0);
+	}
+	void StartEffect()
+	{
+		//CBasePlayer* pPlayer = UTIL_GetLocalPlayer();
+		variant_t emptyVariant;
+		variant_t sVariant;
+		int nRandom;
+		//TODO: blob
+		char modDir[MAX_PATH];
+		if (UTIL_GetModDir(modDir, sizeof(modDir)) == false)
+			return;
+		if (!Q_strcmp(modDir, "ep2chaos"))
+			nRandom = chaos_rng1.GetInt() == -1 ? random->RandomInt(0, 46) : chaos_rng1.GetInt();
+		else if (!Q_strcmp(modDir, "ep1chaos"))
+			nRandom = chaos_rng1.GetInt() == -1 ? random->RandomInt(0, 41) : chaos_rng1.GetInt();
+		else
+			nRandom = chaos_rng1.GetInt() == -1 ? random->RandomInt(0, 40) : chaos_rng1.GetInt();
+		if (nRandom == 0)
+		{
+			m_iSavedChaosID = ChaosSpawnNPC("npc_alyx", "Spawn Alyx", SPAWNTYPE_EYELEVEL_REGULAR, "models/alyx.mdl", "alyx", "weapon_alyxgun")->m_iChaosID;
+			RandomizeReadiness(GetEntityWithID(m_iSavedChaosID));
+		}
+		if (nRandom == 1) m_iSavedChaosID = ChaosSpawnNPC("npc_antlion", "Spawn Antlion", SPAWNTYPE_EYELEVEL_REGULAR, "_", "antlion", "_")->m_iChaosID;
+		if (nRandom == 2) m_iSavedChaosID = ChaosSpawnNPC("npc_antlionguard", "Spawn Antlion Guard", SPAWNTYPE_EYELEVEL_REGULAR, "_", "antlionguard", "_")->m_iChaosID;
+		if (nRandom == 3) m_iSavedChaosID = ChaosSpawnNPC("npc_barnacle", "Spawn Barnacle", SPAWNTYPE_CEILING, "_", "barnacle", "_")->m_iChaosID;
+		if (nRandom == 4)
+		{
+			m_iSavedChaosID = ChaosSpawnNPC("npc_barney", "Spawn Barney", SPAWNTYPE_EYELEVEL_REGULAR, "_", "barney", "weapon_ar2")->m_iChaosID;
+			RandomizeReadiness(GetEntityWithID(m_iSavedChaosID));
+		}
+		if (nRandom == 5) m_iSavedChaosID = ChaosSpawnNPC("npc_breen", "Spawn Breen", SPAWNTYPE_EYELEVEL_REGULAR, "models/breen.mdl", "breen", "_")->m_iChaosID;
+		if (nRandom == 6)
+		{
+			m_iSavedChaosID = ChaosSpawnNPC("npc_citizen", "Spawn Citizen", SPAWNTYPE_EYELEVEL_REGULAR, "models/Humans/Group02/Male_05.mdl", "citizen", "_")->m_iChaosID;
+			RandomizeReadiness(GetEntityWithID(m_iSavedChaosID));
+		}
+		if (nRandom == 7) m_iSavedChaosID = ChaosSpawnNPC("npc_combine_s", "Spawn Combine Soldier", SPAWNTYPE_EYELEVEL_REGULAR, "_", "combine_s", "_")->m_iChaosID;
+		if (nRandom == 8) m_iSavedChaosID = ChaosSpawnNPC("npc_combinedropship", "Spawn Dropship", SPAWNTYPE_BIGFLYER, "_", "combinedropship", "_")->m_iChaosID;
+		if (nRandom == 9) m_iSavedChaosID = ChaosSpawnNPC("npc_combinegunship", "Spawn Gunship", SPAWNTYPE_BIGFLYER, "_", "combinegunship", "_")->m_iChaosID;
+		if (nRandom == 10) m_iSavedChaosID = ChaosSpawnNPC("npc_crow", "Spawn Crow", SPAWNTYPE_EYELEVEL_REGULAR, "models/crow.mdl", "crow", "_")->m_iChaosID;
+		if (nRandom == 11) m_iSavedChaosID = ChaosSpawnNPC("npc_cscanner", "Spawn Scanner", SPAWNTYPE_EYELEVEL_SPECIAL, "models/combine_scanner.mdl", "cscanner", "_")->m_iChaosID;
+		if (nRandom == 12)
+		{
+			m_iSavedChaosID = ChaosSpawnNPC("npc_dog", "Spawn Dog", SPAWNTYPE_EYELEVEL_REGULAR, "_", "dog", "_")->m_iChaosID;
+			GetEntityWithID(m_iSavedChaosID)->AcceptInput("StartCatchThrowBehavior", GetEntityWithID(m_iSavedChaosID), GetEntityWithID(m_iSavedChaosID), emptyVariant, 0);
+		}
+		if (nRandom == 13) m_iSavedChaosID = ChaosSpawnNPC("npc_eli", "Spawn Eli", SPAWNTYPE_EYELEVEL_REGULAR, "models/eli.mdl", "eli", "_")->m_iChaosID;
+		if (nRandom == 14) m_iSavedChaosID = ChaosSpawnNPC("npc_fastzombie", "Spawn Fast Zombie", SPAWNTYPE_EYELEVEL_REGULAR, "_", "fastzombie", "_")->m_iChaosID;
+		if (nRandom == 15) m_iSavedChaosID = ChaosSpawnNPC("npc_gman", "Spawn Gman", SPAWNTYPE_EYELEVEL_REGULAR, "_", "gman", "_")->m_iChaosID;
+		if (nRandom == 16) m_iSavedChaosID = ChaosSpawnNPC("npc_headcrab", "Spawn Headcrab", SPAWNTYPE_EYELEVEL_REGULAR, "_", "headcrab", "_")->m_iChaosID;
+		if (nRandom == 17) m_iSavedChaosID = ChaosSpawnNPC("npc_headcrab_black", "Spawn Poison Headcrab", SPAWNTYPE_EYELEVEL_REGULAR, "_", "headcrab_black", "_")->m_iChaosID;
+		if (nRandom == 18) m_iSavedChaosID = ChaosSpawnNPC("npc_headcrab_fast", "Spawn Fast Headcrab", SPAWNTYPE_EYELEVEL_REGULAR, "_", "headcrab_fast", "_")->m_iChaosID;
+		if (nRandom == 19) m_iSavedChaosID = ChaosSpawnNPC("npc_helicopter", "Spawn Hunter-Chopper", SPAWNTYPE_BIGFLYER, "_", "helicopter", "_")->m_iChaosID;
+		if (nRandom == 20) m_iSavedChaosID = ChaosSpawnNPC("npc_ichthyosaur", "Spawn Ichthyosaur", SPAWNTYPE_EYELEVEL_SPECIAL, "_", "ichthyosaur", "_")->m_iChaosID;
+		if (nRandom == 21) m_iSavedChaosID = ChaosSpawnNPC("npc_kleiner", "Spawn Dr. Kleiner", SPAWNTYPE_EYELEVEL_REGULAR, "models/kleiner.mdl", "kleiner", "_")->m_iChaosID;
+		if (nRandom == 22) m_iSavedChaosID = ChaosSpawnNPC("npc_manhack", "Spawn Manhack", SPAWNTYPE_EYELEVEL_SPECIAL, "_", "manhack", "_")->m_iChaosID;
+		if (nRandom == 23) m_iSavedChaosID = ChaosSpawnNPC("npc_metropolice", "Spawn CP Unit", SPAWNTYPE_EYELEVEL_REGULAR, "_", "metropolice", "_")->m_iChaosID;
+		if (nRandom == 24) m_iSavedChaosID = ChaosSpawnNPC("npc_monk", "Spawn Father Grigori", SPAWNTYPE_EYELEVEL_REGULAR, "_", "monk", "weapon_annabelle")->m_iChaosID;
+		if (nRandom == 25) m_iSavedChaosID = ChaosSpawnNPC("npc_mossman", "Spawn Dr. Mossman", SPAWNTYPE_EYELEVEL_REGULAR, "_", "mossman", "_")->m_iChaosID;
+		if (nRandom == 26) m_iSavedChaosID = ChaosSpawnNPC("npc_pigeon", "Spawn Pigeon", SPAWNTYPE_EYELEVEL_REGULAR, "models/pigeon.mdl", "pigeon", "_")->m_iChaosID;
+		if (nRandom == 27) m_iSavedChaosID = ChaosSpawnNPC("npc_poisonzombie", "Spawn Poison Zombie", SPAWNTYPE_EYELEVEL_REGULAR, "_", "poisonzombie", "_")->m_iChaosID;
+		if (nRandom == 28) m_iSavedChaosID = ChaosSpawnNPC("npc_rollermine", "Spawn Rollermine", SPAWNTYPE_EYELEVEL_REGULAR, "_", "rollermine", "_")->m_iChaosID;
+		if (nRandom == 29) m_iSavedChaosID = ChaosSpawnNPC("npc_seagull", "Spawn Seagull", SPAWNTYPE_EYELEVEL_REGULAR, "models/seagull.mdl", "seagull", "_")->m_iChaosID;
+		if (nRandom == 30) m_iSavedChaosID = ChaosSpawnNPC("npc_sniper", "Spawn Sniper", SPAWNTYPE_EYELEVEL_SPECIAL, "_", "sniper", "_")->m_iChaosID;
+		if (nRandom == 31) m_iSavedChaosID = ChaosSpawnNPC("npc_stalker", "Spawn Stalker", SPAWNTYPE_EYELEVEL_REGULAR, "_", "stalker", "_")->m_iChaosID;
+		if (nRandom == 32) m_iSavedChaosID = ChaosSpawnNPC("npc_strider", "Spawn Strider", SPAWNTYPE_STRIDER, "models/combine_strider.mdl", "strider", "_")->m_iChaosID;
+		if (nRandom == 33) m_iSavedChaosID = ChaosSpawnNPC("npc_turret_ceiling", "Spawn Ceiling Turret", SPAWNTYPE_CEILING, "_", "turret_ceiling", "_")->m_iChaosID;
+		if (nRandom == 34) m_iSavedChaosID = ChaosSpawnNPC("npc_turret_floor", "Spawn Turret", SPAWNTYPE_EYELEVEL_REGULAR, "_", "turret_floor", "_")->m_iChaosID;
+		if (nRandom == 35) m_iSavedChaosID = ChaosSpawnNPC("npc_turret_ground", "Spawn Ground Turret", SPAWNTYPE_UNDERGROUND, "_", "turret_ground", "_")->m_iChaosID;
+		if (nRandom == 36)
+		{
+			m_iSavedChaosID = ChaosSpawnNPC("npc_vortigaunt", "Spawn Vortigaunt", SPAWNTYPE_EYELEVEL_REGULAR, "models/vortigaunt.mdl", "vortigaunt", "_")->m_iChaosID;
+			RandomizeReadiness(GetEntityWithID(m_iSavedChaosID));
+		}
+		if (nRandom == 37) m_iSavedChaosID = ChaosSpawnNPC("npc_zombie", "Spawn Zombie", SPAWNTYPE_EYELEVEL_REGULAR, "_", "zombie", "_")->m_iChaosID;
+		if (nRandom == 38) m_iSavedChaosID = ChaosSpawnNPC("npc_zombie_torso", "Spawn Zombie Torso", SPAWNTYPE_EYELEVEL_REGULAR, "_", "zombie_torso", "_")->m_iChaosID;
+		if (nRandom == 39)
+		{
+			m_iSavedChaosID = ChaosSpawnNPC("npc_fisherman", "Spawn Fisherman", SPAWNTYPE_EYELEVEL_REGULAR, "_", "fisherman", "weapon_oldmanharpoon")->m_iChaosID;
+			RandomizeReadiness(GetEntityWithID(m_iSavedChaosID));
+		}
+		if (nRandom == 40)
+		{
+			ChaosSpawnVehicle("prop_vehicle_apc", SPAWNTYPE_VEHICLE, "models/combine_apc.mdl", "apc", "scripts/vehicles/apc_npc.txt");
+			m_iSavedChaosID = ChaosSpawnNPC("npc_apcdriver", "Spawn APC (!)", SPAWNTYPE_EYELEVEL_SPECIAL, "_", "apcdriver", "_")->m_iChaosID;
+			//make apc follow player
+			/*
+			sVariant.SetString("!player");
+			g_EventQueue.AddEvent("apcdriver", "GotoPathCorner", sVariant, 0, pPlayer, pPlayer, 0);
+			g_EventQueue.AddEvent("apcdriver", "GotoPathCorner", sVariant, 10, pPlayer, pPlayer, 0);
+			g_EventQueue.AddEvent("apcdriver", "GotoPathCorner", sVariant, 20, pPlayer, pPlayer, 0);
+			g_EventQueue.AddEvent("apcdriver", "GotoPathCorner", sVariant, 30, pPlayer, pPlayer, 0);
+			g_EventQueue.AddEvent("apcdriver", "GotoPathCorner", sVariant, 40, pPlayer, pPlayer, 0);
+			g_EventQueue.AddEvent("apcdriver", "GotoPathCorner", sVariant, 50, pPlayer, pPlayer, 0);
+			g_EventQueue.AddEvent("apcdriver", "GotoPathCorner", sVariant, 60, pPlayer, pPlayer, 0);
+			*/
+		}
+		//ep1
+		if (nRandom == 41) m_iSavedChaosID = ChaosSpawnNPC("npc_zombine", "Spawn Zombine", SPAWNTYPE_EYELEVEL_REGULAR, "_", "zombine", "_")->m_iChaosID;
+		//ep2
+		if (nRandom == 42) m_iSavedChaosID = ChaosSpawnNPC("npc_advisor", "Spawn Advisor", SPAWNTYPE_EYELEVEL_SPECIAL, "models/advisor.mdl", "advisor", "_")->m_iChaosID;
+		if (nRandom == 43) m_iSavedChaosID = ChaosSpawnNPC("npc_antlion_grub", "Spawn Antlion Grub", SPAWNTYPE_EYELEVEL_REGULAR, "_", "antlion_grub", "_")->m_iChaosID;
+		if (nRandom == 44) m_iSavedChaosID = ChaosSpawnNPC("npc_fastzombie_torso", "Spawn Fast Zombie Torso", SPAWNTYPE_EYELEVEL_REGULAR, "_", "fastzombie_torso", "_")->m_iChaosID;
+		if (nRandom == 45) m_iSavedChaosID = ChaosSpawnNPC("npc_hunter", "Spawn Hunter", SPAWNTYPE_EYELEVEL_REGULAR, "_", "hunter", "_")->m_iChaosID;
+		if (nRandom == 46) m_iSavedChaosID = ChaosSpawnNPC("npc_magnusson", "Spawn Dr. Magnusson", SPAWNTYPE_EYELEVEL_REGULAR, "models/magnusson.mdl", "magnusson", "_")->m_iChaosID;
+	}
+	bool CheckStrike(const CTakeDamageInfo &info)
+	{
+		return info.GetAttacker() == GetEntityWithID(m_iSavedChaosID);
+	}
+	int m_iSavedChaosID;
+END_EFFECT()
+
+BEGIN_EFFECT(EFFECT_SWIM_IN_AIR, "Water World", swim_in_air, true)
+	void StartEffect()
+	{
+		UTIL_GetLocalPlayer()->m_bSwimInAir = true;
+	}
+	void StopEffect()
+	{
+		UTIL_GetLocalPlayer()->m_bSwimInAir = false;
+	}
+	void Think()
+	{
+		//TODO: can we move this to Think? it's just been here since creation.
+		CBasePlayer *pPlayer = UTIL_GetLocalPlayer();
+		if (!pPlayer->IsInAVehicle())
+		{
+			pPlayer->SetWaterLevel(WL_Eyes);
+			pPlayer->SetPlayerUnderwater(true);
+			pPlayer->AddFlag(FL_INWATER);
+			pPlayer->AddFlag(FL_SWIM);
+		}
+		//other half of this logic is in prethink
+		SetNextThink(0.0f);
+	}
+	bool CheckStrike(const CTakeDamageInfo &info)
+	{
+		return (info.GetDamageType() & DMG_DROWN) != 0;
+	}
+END_EFFECT()
+
+BEGIN_EFFECT(EFFECT_ONLY_DRAW_WORLD, "Where Are The Objects?", only_draw_world, true)
+	void StartEffect()
+	{
+		engine->ClientCommand(engine->PEntityOfEntIndex(1), "r_drawfuncdetail 0;r_drawstaticprops 0;r_drawentities 0");
+	}
+	void StopEffect()
+	{
+		engine->ClientCommand(engine->PEntityOfEntIndex(1), "r_drawfuncdetail 1;r_drawstaticprops 1;r_drawentities 1\n");
+	}
+END_EFFECT()
+
+BEGIN_EFFECT(EFFECT_LOW_DETAIL, "Ultra Low Detail", low_detail, true)
+	void StartEffect()
+	{
+		engine->ClientCommand(engine->PEntityOfEntIndex(1), "mat_picmip 4;r_lod 6;mat_filtertextures 0;mat_filterlightmaps 0");
+	}
+	void StopEffect()
+	{
+		engine->ClientCommand(engine->PEntityOfEntIndex(1), "mat_picmip -1;r_lod -1;mat_filtertextures 1;mat_filterlightmaps 1\n");
+	}
+END_EFFECT()
+
+BEGIN_EFFECT(EFFECT_PLAYER_BIG, "Player is Huge", player_big, true)
+	void StartEffect()
+	{
+		UTIL_GetLocalPlayer()->SetModelScale(2);
+		UTIL_GetLocalPlayer()->GetUnstuck(500);//done here so that the player won't be stuck when reloading a save that was made before the effect was on
+	}
+	void StopEffect()
+	{
+		UTIL_GetLocalPlayer()->SetModelScale(1);
+		if (g_chaosController.IsEffectActive(EFFECT_PLAYER_SMALL))
+		{
+			//EFFECT_PLAYER_SMALL is active and will outlast me, restore its effects
+			GetEffectByID(EFFECT_PLAYER_SMALL)->StartEffect();
+		}
+	}
+END_EFFECT()
+
+BEGIN_EFFECT(EFFECT_PLAYER_SMALL, "Player is Tiny", player_small, true)
+	void StartEffect()
+	{
+		UTIL_GetLocalPlayer()->SetModelScale(0.5);
+	}
+	void StopEffect()
+	{
+		UTIL_GetLocalPlayer()->SetModelScale(1);
+		UTIL_GetLocalPlayer()->GetUnstuck(500);
+		if (g_chaosController.IsEffectActive(EFFECT_PLAYER_BIG))
+		{
+			//EFFECT_PLAYER_BIG is active and will outlast me, restore its effects
+			GetEffectByID(EFFECT_PLAYER_BIG)->StartEffect();
+		}
+	}
+	void Think()
+	{
+		if (!UTIL_GetLocalPlayer()->IsInAVehicle())
+			UTIL_GetLocalPlayer()->GetUnstuck(500);
+		SetNextThink(1.0f);
+	}
+END_EFFECT()
+
+BEGIN_EFFECT(EFFECT_NO_MOUSE_HORIZONTAL, "No Looking Left/Right", no_mouse_horizontal, true)
+	void StartEffect()
+	{
+		engine->ClientCommand(engine->PEntityOfEntIndex(1), "sv_cheats 1;wait 10;m_yaw 0.0f;cl_yawspeed 0");
+	}
+	void StopEffect()
+	{
+		engine->ClientCommand(engine->PEntityOfEntIndex(1), "exec yaw\n");
+	}
+END_EFFECT()
+
+BEGIN_EFFECT(EFFECT_NO_MOUSE_VERTICAL, "No Looking Up/Down", no_mouse_vertical, true)
+	void StartEffect()
+	{
+		engine->ClientCommand(engine->PEntityOfEntIndex(1), "sv_cheats 1;wait 10;m_pitch 0.0f;cl_pitchspeed 0");
+	}
+	void StopEffect()
+	{
+		engine->ClientCommand(engine->PEntityOfEntIndex(1), "exec pitch\n");
+	}
+END_EFFECT()
+
+BEGIN_EFFECT(EFFECT_SUPER_GRAB, "Didn't Skip Arm Day", super_grab, true)
+	void StartEffect()
+	{
+		CBasePlayer* pPlayer = UTIL_GetLocalPlayer();
+		CHL2_Player *pHL2Player = static_cast<CHL2_Player*>(pPlayer);
+		player_use_dist.SetValue(8000);
+		player_throwforce.SetValue(50000);
+		if (pHL2Player)
+			pHL2Player->m_bSuperGrab = true;
+	}
+	void StopEffect()
+	{
+		CBasePlayer* pPlayer = UTIL_GetLocalPlayer();
+		CHL2_Player *pHL2Player = static_cast<CHL2_Player*>(pPlayer);
+		player_use_dist.SetValue(80);
+		player_throwforce.SetValue(1000);
+		if (pHL2Player)
+			pHL2Player->m_bSuperGrab = false;
+	}
+END_EFFECT()
+
+bool CChaosEffect::ChaosSpawnWeapon(const char *className, const char *strActualName, int iCount, const char *strAmmoType, int iCount2, const char *strAmmoType2)
+{
+	bool bGaveWeapon = UTIL_GetLocalPlayer()->GiveNamedItem(className) != NULL;
+	if (!bGaveWeapon)
+		return false;
+	SetName(strActualName);
+	if (iCount)
+		UTIL_GetLocalPlayer()->GiveAmmo(iCount, strAmmoType);
+	if (iCount2)
+		UTIL_GetLocalPlayer()->GiveAmmo(iCount2, strAmmoType2);
+	return bGaveWeapon;
+}
+
+DEFINE_EFFECT_SINGLEFIRE(EFFECT_GIVE_WEAPON, "Give Random Weapon", give_weapon)
+{
+	UTIL_GetLocalPlayer()->EquipSuit();
+	int nRandom;
+	//TODO: harpoon, stunstick, slam, alyxgun, annabelle, citizenpackage, citizensuitcase, cubemap
+	for (int iWeaponAttempts = 0; iWeaponAttempts <= 30; iWeaponAttempts++)
+	{
+		nRandom = chaos_rng1.GetInt() == -1 ? random->RandomInt(0, 10) : chaos_rng1.GetInt();
+		if (nRandom == 0) if (ChaosSpawnWeapon("weapon_crowbar", "Give Crowbar")) return;
+		if (nRandom == 1) if (ChaosSpawnWeapon("weapon_physcannon", "Give Gravity Gun")) return;
+		if (nRandom == 2) if (ChaosSpawnWeapon("weapon_pistol", "Give Pistol", 255, "Pistol")) return;
+		if (nRandom == 3) if (ChaosSpawnWeapon("weapon_357", "Give .357 Magnum", 32, "357")) return;
+		if (nRandom == 4) if (ChaosSpawnWeapon("weapon_smg1", "Give SMG", 255, "SMG1", 3, "smg1_grenade")) return;
+		if (nRandom == 5) if (ChaosSpawnWeapon("weapon_ar2", "Give AR2", 255, "AR2", 5, "AR2AltFire")) return;
+		if (nRandom == 6) if (ChaosSpawnWeapon("weapon_shotgun", "Give Shotgun", 255, "Buckshot")) return;
+		if (nRandom == 7) if (ChaosSpawnWeapon("weapon_crossbow", "Give Crossbow", 16, "XBowBolt")) return;
+		if (nRandom == 8) if (ChaosSpawnWeapon("weapon_frag", "Give Grenade", 5, "grenade")) return;
+		if (nRandom == 9) if (ChaosSpawnWeapon("weapon_rpg", "Give RPG", 3, "rpg_round")) return;
+		if (nRandom == 10)
+		{
+			if (ChaosSpawnWeapon("weapon_bugbait", "Give Bugbait"))
+			{
+				GlobalEntity_Add("antlion_allied", STRING(gpGlobals->mapname), GLOBAL_ON);//antlions become friendly
+				return;
+			}
+		}
+	}
+}
+
+DEFINE_EFFECT_SINGLEFIRE(EFFECT_GIVE_ALL_WEAPONS, "Give All Weapons", give_all_weapons)
+{
+		UTIL_GetLocalPlayer()->EquipSuit();
+		ChaosSpawnWeapon("weapon_crowbar", "Give All Weapons");
+		ChaosSpawnWeapon("weapon_physcannon", "Give All Weapons");
+		ChaosSpawnWeapon("weapon_pistol", "Give All Weapons", 75, "Pistol");
+		ChaosSpawnWeapon("weapon_357", "Give All Weapons", 9, "357");
+		ChaosSpawnWeapon("weapon_smg1", "Give All Weapons", 128, "SMG1", 1, "smg1_grenade");
+		ChaosSpawnWeapon("weapon_ar2", "Give All Weapons", 30, "AR2", 1, "AR2AltFire");
+		ChaosSpawnWeapon("weapon_shotgun", "Give All Weapons", 15, "Buckshot");
+		ChaosSpawnWeapon("weapon_crossbow", "Give All Weapons", 5, "XBowBolt");
+		ChaosSpawnWeapon("weapon_frag", "Give All Weapons", 5, "grenade");
+		ChaosSpawnWeapon("weapon_rpg", "Give All Weapons", 3, "rpg_round");
+		ChaosSpawnWeapon("weapon_bugbait", "Give All Weapons");
+		GlobalEntity_Add("antlion_allied", STRING(gpGlobals->mapname), GLOBAL_ON);//antlions become friendly
+}
+
+BEGIN_EFFECT(EFFECT_DROP_WEAPONS, "Drop Weapons", drop_weapons, false)
+	void StartEffect()
+	{
+		m_bDone = false;
+	}
+	void Think()
+	{
+		if (m_bDone)
+			return;
+		SetNextThink(0.0f);
+		CBasePlayer* pPlayer = UTIL_GetLocalPlayer();
+		CBaseCombatWeapon *pActiveWeapon = pPlayer->GetActiveWeapon();
+		QAngle gunAngles;
+		VectorAngles(pPlayer->BodyDirection2D(), gunAngles);
+		Vector vecForward;
+		AngleVectors(gunAngles, &vecForward, NULL, NULL);
+		float flDiameter = sqrt(pPlayer->CollisionProp()->OBBSize().x * pPlayer->CollisionProp()->OBBSize().x +
+			pPlayer->CollisionProp()->OBBSize().y * pPlayer->CollisionProp()->OBBSize().y);
+		for (int i = 0; i<MAX_WEAPONS; ++i)
+		{
+			CBaseCombatWeapon *pWeapon = pPlayer->m_hMyWeapons[i];
+			if (!pWeapon)
+				continue;
+			// Have to drop this after we've dropped everything else, so autoswitch doesn't happen
+			if (pWeapon == pActiveWeapon)
+				continue;
+			pPlayer->DropWeaponForWeaponStrip(pWeapon, vecForward, gunAngles, flDiameter);
+
+			//a little speculative fix. we had an unexplainable engine crash once when dropping all weapons simultaneously
+			//so now we're dropping one per tick to hopefully fix that
+			return;
+		}
+		m_bDone = true;
+		// Drop the active weapon normally...
+		if (pActiveWeapon)
+		{
+			// Nowhere in particular; just drop it.
+			Vector vecThrow;
+			pPlayer->ThrowDirForWeaponStrip(pActiveWeapon, vecForward, &vecThrow);
+			// Throw a little more vigorously; it starts closer to the player
+			vecThrow *= random->RandomFloat(800.0f, 1000.0f);
+			pPlayer->Weapon_Drop(pActiveWeapon, NULL, &vecThrow);
+			pActiveWeapon->SetRemoveable(false);
+		}
+	}
+	bool m_bDone;
+END_EFFECT()
+
+BEGIN_EFFECT(EFFECT_NADE_GUNS, "Grenade Guns", nade_guns, true)
+	void StartEffect()
+	{
+		chaos_replace_bullets_with_grenades.SetValue(1);
+	}
+	void StopEffect()
+	{
+		chaos_replace_bullets_with_grenades.SetValue(0);
+	}
+END_EFFECT()
+
+BEGIN_EFFECT(EFFECT_EARTHQUAKE, "Wobbly", earthquake, true)
+	void StartEffect()
+	{
+		UTIL_ScreenShake(UTIL_GetLocalPlayer()->WorldSpaceCenter(), 50 * UTIL_GetLocalPlayer()->GetModelScale(), 2, GetSecondsRemaining(), 375, SHAKE_START, true);
+	}
+	void LevelTransition()
+	{
+		StartEffect();
+	}
+END_EFFECT()
+
+DEFINE_EFFECT_SINGLEFIRE(EFFECT_FUNNY_NUMBER, "Funny Number", funny_number)
+{
+	CBasePlayer* pPlayer = UTIL_GetLocalPlayer();
+	if (!pPlayer) 
+		return; // no idea how that could happen but better be safe.
+	pPlayer->SetHealth(13);
+	pPlayer->SetArmorValue(37);
+
+	CBaseCombatWeapon *pActiveWeapon = pPlayer->GetActiveWeapon();
+	if (!pActiveWeapon)
+		return;
+
+	// avoid giving huge ammo counts to stuff like rocket launcher and gravity gun
+	if (pActiveWeapon->UsesClipsForAmmo1())
+	{
+		pActiveWeapon->m_iClip1 = 69;
+		pPlayer->SetAmmoCount(420, pActiveWeapon->GetPrimaryAmmoType());
+	}
+}
+
+ConVar getnearbynodes_debug("getnearbynodes_debug", "0");
+CNodeList *GetNearbyNodes(int iNodes)
+{
+	CAI_Node *pNode;
+	float flClosest = FLT_MAX;
+	bool full = false;
+	CNodeList *result = new CNodeList;
+	result->SetLessFunc(CNodeList::RevIsLowerPriority);//this impacts sorting, MUST be kept
+	for (int node = 0; node < g_pBigAINet->NumNodes(); node++)
+	{
+		pNode = g_pBigAINet->GetNode(node);
+		if (pNode->GetType() != NODE_GROUND)
+		{
+			if (getnearbynodes_debug.GetBool()) Msg("Rejected node %i for not being a ground node\n", pNode->GetId());
+			continue;
+		}
+		float flDist = (UTIL_GetLocalPlayer()->GetAbsOrigin() - pNode->GetPosition(HULL_HUMAN)).Length();
+		if (flDist < flClosest)
+		{
+			if (getnearbynodes_debug.GetBool()) Msg("node %i is closer (%0.1f) than previous closest (%0.1f)\n", pNode->GetId(), flDist, flClosest);
+			flClosest = flDist;
+		}
+		if (!full || (flDist < result->ElementAtHead().dist))
+		{
+			if (getnearbynodes_debug.GetBool()) Msg("Adding node %i to list. full is %s, %0.1f < %0.1f\n", pNode->GetId(), full ? "TRUE" : "FALSE", flDist, result->Count() > 0 ? result->ElementAtHead().dist : 1234);
+			if (full)
+			{
+				if (getnearbynodes_debug.GetBool()) Msg("List full, removing node %i to add node %i\n", result->ElementAtHead().nodeIndex, pNode->GetId());
+				result->RemoveAtHead();
+			}
+			result->Insert(AI_NearNode_t(node, flDist));
+			full = (result->Count() == iNodes);
+		}
+		else if (flDist >= result->ElementAtHead().dist)
+		{
+			if (getnearbynodes_debug.GetBool()) Warning("Not adding  %i to list. full is %s, %0.1f < %0.1f\n", pNode->GetId(), full ? "TRUE" : "FALSE", flDist, result->Count() > 0 ? result->ElementAtHead().dist : 1234);
+		}
+	}
+	Msg("list has %i nodes\n", result->Count());
+	return result;
+}
+
+//intentionally no strike check because the chance that you can't kill at least one zombie per life is super low
+//maybe we could do something but ehhhh. the prospect of dying and reloading from this effect is part of the appeal.
+//maybe instead of abort removing all zombies, just remove the one that did the final blow
+DEFINE_EFFECT_SINGLEFIRE(EFFECT_ZOMBIE_SPAM, "Left 4 Dead", zombie_spam)
+{
+	char modDir[MAX_PATH];
+	if (UTIL_GetModDir(modDir, sizeof(modDir)) == false)
+		return;
+	CAI_Node *pNode;
+	CNodeList *result = GetNearbyNodes(20);
+	for (; result->Count(); result->RemoveAtHead())
+	{
+		pNode = g_pBigAINet->GetNode(result->ElementAtHead().nodeIndex);
+		//trace_t trace;
+		//UTIL_TraceHull(pNode->GetPosition(HULL_HUMAN) + Vector(0, 0, 32), pNode->GetPosition(HULL_HUMAN) + Vector(0, 0, 32), NAI_Hull::Mins(HULL_HUMAN), NAI_Hull::Maxs(HULL_HUMAN), 0, NULL, COLLISION_GROUP_NONE, &trace);
+		//if (trace.fraction == 1)
+		//{
+		int nRandom;
+		if (!Q_strcmp(modDir, "ep2chaos"))
+			nRandom = fmod((chaos_rng1.GetInt() == -1 ? random->RandomInt(0, 5) : chaos_rng1.GetInt()) + result->ElementAtHead().nodeIndex, 6);
+		else if (!Q_strcmp(modDir, "ep1chaos"))
+			nRandom = fmod((chaos_rng1.GetInt() == -1 ? random->RandomInt(0, 4) : chaos_rng1.GetInt()) + result->ElementAtHead().nodeIndex, 5);
+		else
+			nRandom = fmod((chaos_rng1.GetInt() == -1 ? random->RandomInt(0, 3) : chaos_rng1.GetInt()) + result->ElementAtHead().nodeIndex, 4);
+		if (nRandom == 0)
+		{
+			CBaseEntity *pNPC = (CBaseEntity *)CreateEntityByName("npc_zombie");
+			pNPC->SetAbsOrigin(pNode->GetOrigin());
+			pNPC->KeyValue("targetname", "l4d_zombie");
+			g_iChaosSpawnCount++; pNPC->KeyValue("chaosid", g_iChaosSpawnCount);
+			DispatchSpawn(pNPC);
+			pNPC->Activate();
+			pNPC->m_bChaosSpawned = true;
+			pNPC->m_bChaosPersist = true;
+		}
+		if (nRandom == 1)
+		{
+			CBaseEntity *pNPC = (CBaseEntity *)CreateEntityByName("npc_zombie_torso");
+			pNPC->SetAbsOrigin(pNode->GetOrigin());
+			pNPC->KeyValue("targetname", "l4d_zombie");
+			g_iChaosSpawnCount++; pNPC->KeyValue("chaosid", g_iChaosSpawnCount);
+			DispatchSpawn(pNPC);
+			pNPC->Activate();
+			pNPC->m_bChaosSpawned = true;
+			pNPC->m_bChaosPersist = true;
+		}
+		if (nRandom == 2)
+		{
+			CBaseEntity *pNPC = (CBaseEntity *)CreateEntityByName("npc_poisonzombie");
+			pNPC->SetAbsOrigin(pNode->GetOrigin());
+			pNPC->KeyValue("targetname", "l4d_zombie");
+			g_iChaosSpawnCount++; pNPC->KeyValue("chaosid", g_iChaosSpawnCount);
+			DispatchSpawn(pNPC);
+			pNPC->Activate();
+			pNPC->m_bChaosSpawned = true;
+			pNPC->m_bChaosPersist = true;
+		}
+		if (nRandom == 3)
+		{
+			CBaseEntity *pNPC = (CBaseEntity *)CreateEntityByName("npc_fastzombie");
+			pNPC->SetAbsOrigin(pNode->GetOrigin());
+			pNPC->KeyValue("targetname", "l4d_zombie");
+			g_iChaosSpawnCount++; pNPC->KeyValue("chaosid", g_iChaosSpawnCount);
+			DispatchSpawn(pNPC);
+			pNPC->Activate();
+			pNPC->m_bChaosSpawned = true;
+			pNPC->m_bChaosPersist = true;
+		}
+		//ep1
+		if (nRandom == 4)
+		{
+			CBaseEntity *pNPC = (CBaseEntity *)CreateEntityByName("npc_zombine");
+			pNPC->SetAbsOrigin(pNode->GetOrigin());
+			pNPC->KeyValue("targetname", "l4d_zombie");
+			g_iChaosSpawnCount++; pNPC->KeyValue("chaosid", g_iChaosSpawnCount);
+			DispatchSpawn(pNPC);
+			pNPC->Activate();
+			pNPC->m_bChaosSpawned = true;
+			pNPC->m_bChaosPersist = true;
+		}
+		//ep2
+		if (nRandom == 5)
+		{
+			CBaseEntity *pNPC = (CBaseEntity *)CreateEntityByName("npc_fastzombie_torso");
+			pNPC->SetAbsOrigin(pNode->GetOrigin());
+			pNPC->KeyValue("targetname", "l4d_zombie");
+			g_iChaosSpawnCount++; pNPC->KeyValue("chaosid", g_iChaosSpawnCount);
+			DispatchSpawn(pNPC);
+			pNPC->Activate();
+			pNPC->m_bChaosSpawned = true;
+			pNPC->m_bChaosPersist = true;
+		}
+		//}
+	}
+}
+
+BEGIN_EFFECT(EFFECT_EXPLODE_ON_DEATH, "NPCs Explode on Death", explode_on_death, true)
+	void StartEffect()
+	{
+		chaos_explode_on_death.SetValue(1);
+	}
+	void StopEffect()
+	{
+		chaos_explode_on_death.SetValue(0);
+	}
+END_EFFECT()
+
+BEGIN_EFFECT(EFFECT_BULLET_TELEPORT, "Teleporter Bullets", bullet_teleport, true)
+	void StartEffect()
+	{
+		chaos_bullet_teleport.SetValue(1);
+	}
+	void StopEffect()
+	{
+		chaos_bullet_teleport.SetValue(0);
+	}
+END_EFFECT()
+
+BEGIN_EFFECT(EFFECT_CREDITS, "Credits", credits, false)
+	void StartEffect()
+	{
+		CBasePlayer* pPlayer = UTIL_GetLocalPlayer();
+		//visual
+		CSingleUserRecipientFilter user(pPlayer);
+		user.MakeReliable();
+		UserMessageBegin(user, "CreditsMsg");
+		WRITE_BYTE(3);
+		MessageEnd();
+		//audio
+		CPASAttenuationFilter filter(pPlayer);
+		EmitSound_t ep;
+		ep.m_nChannel = CHAN_STATIC;
+		ep.m_pSoundName = "*#music/hl2_song3.mp3";
+		ep.m_flVolume = 1;
+		ep.m_SoundLevel = SNDLVL_NORM;
+		ep.m_nPitch = PITCH_NORM;
+		pPlayer->EmitSound(filter, pPlayer->entindex(), ep);
+
+		//hack effect length so we can play song 2
+		m_flTimeRem = 100;
+		m_bPlayedSecondSong = false;
+		SetNextThink(86.5f); // delay second song
+	}
+	void Think()
+	{
+		SetNextThink(99999999.0f); // TODO: make this never think
+		m_flTimeRem = 0; // we're done here. remove ourselves or reduce to some normal ammount
+		if (m_bPlayedSecondSong)
+			return;
+		m_bPlayedSecondSong = true;
+		CBasePlayer* pPlayer = UTIL_GetLocalPlayer();
+		CPASAttenuationFilter filter(pPlayer);
+		EmitSound_t ep;
+		ep.m_nChannel = CHAN_STATIC;
+		ep.m_pSoundName = "*#music/hl1_song25_remix3.mp3";
+		ep.m_flVolume = 1;
+		ep.m_SoundLevel = SNDLVL_NORM;
+		ep.m_nPitch = PITCH_NORM;
+		pPlayer->EmitSound(filter, pPlayer->entindex(), ep);
+	}
+	void RestoreEffect()
+	{
+		//if we reload, the credits visual disappears and as far as i know we can't put it back to where it was at time of load, so we don't bother restoring it
+		//playing song 2 would make no sense without the visual
+		m_bPlayedSecondSong = true;
+	}
+	void LevelTransition()
+	{
+		//if we reload, the credits visual disappears and as far as i know we can't put it back to where it was at time of load, so we don't bother restoring it
+		//playing song 2 would make no sense without the visual
+		m_bPlayedSecondSong = true;
+	}
+	bool m_bPlayedSecondSong;
+END_EFFECT()
+
+BEGIN_EFFECT(EFFECT_SUPERHOT, "Superhot", superhot, true)
+	void StopEffect()
+	{
+		engine->ClientCommand(engine->PEntityOfEntIndex(1), "host_timescale 1");
+	}
+	void Think()
+	{
+		SetNextThink(0.0f); // think immediately again
+		CBasePlayer* pPlayer = UTIL_GetLocalPlayer();
+		if (pPlayer->pl.deadflag)
+		{
+			cvar->FindVar("host_timescale")->SetValue(1);
+			return;
+		}
+		CBaseEntity *pVehicle = pPlayer->GetVehicleEntity();
+		Vector vecVelocity;
+		if (pVehicle && pVehicle->VPhysicsGetObject())
+		{
+			pVehicle->VPhysicsGetObject()->GetVelocity(&vecVelocity, NULL);
+		}
+		else
+		{
+			vecVelocity = pPlayer->GetAbsVelocity();
+		}
+		//If input locks up, change 0.07 to something higher
+		float flNum = min(3, 2 * max(0.07, 1 / (hl2_normspeed.GetFloat() / max(hl2_normspeed.GetFloat() * 0.05, vecVelocity.Length()))));
+		cvar->FindVar("host_timescale")->SetValue(flNum);
+	}
+END_EFFECT()
+
+BEGIN_EFFECT(EFFECT_SUPERCOLD, "Supercold", supercold, true)
+	void StopEffect()
+	{
+		engine->ClientCommand(engine->PEntityOfEntIndex(1), "host_timescale 1");
+	}
+	void Think()
+	{
+		SetNextThink(0.0f); // think immediately again
+		CBasePlayer* pPlayer = UTIL_GetLocalPlayer();
+		if (pPlayer->pl.deadflag)
+		{
+			cvar->FindVar("host_timescale")->SetValue(1);
+			return;
+		}
+		CBaseEntity *pVehicle = pPlayer->GetVehicleEntity();
+		Vector vecVelocity;
+		if (pVehicle && pVehicle->VPhysicsGetObject())
+		{
+			pVehicle->VPhysicsGetObject()->GetVelocity(&vecVelocity, NULL);
+		}
+		else
+		{
+			vecVelocity = pPlayer->GetAbsVelocity();
+		}
+		float flNum = max(0.3, (hl2_normspeed.GetFloat() / max(hl2_normspeed.GetFloat() * 0.3, vecVelocity.Length())));
+	}
+END_EFFECT()
+
+BEGIN_EFFECT(EFFECT_BARREL_SHOTGUN, "Double Barrel Shotgun", barrel_shotgun, true)
+	void StartEffect()
+	{
+		chaos_barrel_shotgun.SetValue(1);
+	}
+	void StopEffect()
+	{
+		chaos_barrel_shotgun.SetValue(0);
+	}
+	bool CheckStrike(const CTakeDamageInfo &info)
+	{
+		return !strcmp(STRING(info.GetAttacker()->GetModelName()), "models/props_c17/oildrum001_explosive.mdl") && info.GetAttacker()->m_bChaosSpawned;
+	}
+END_EFFECT()
+
+BEGIN_EFFECT(EFFECT_QUICKCLIP_ON, "Enable Quickclip", quickclip_on, false)
+	void StartEffect()
+	{
+		UTIL_GetLocalPlayer()->SetCollisionGroup(COLLISION_GROUP_IN_VEHICLE);
+	}
+END_EFFECT()
+
+BEGIN_EFFECT(EFFECT_QUICKCLIP_OFF, "Disable Quickclip", quickclip_off, false)
+	void StartEffect()
+	{
+		UTIL_GetLocalPlayer()->SetCollisionGroup(COLLISION_GROUP_PLAYER);
+	}
+END_EFFECT()
+
+BEGIN_EFFECT(EFFECT_SOLID_TRIGGERS, "Solid Triggers", solid_triggers, true)
+	void StartEffect()
+	{
+		CBaseEntity *pEnt = gEntList.FirstEnt();
+		CBasePlayer* pPlayer = UTIL_GetLocalPlayer();
+		while (pEnt)
+		{
+			CBaseTrigger *pBaseTrigger = dynamic_cast<CBaseTrigger *>(pEnt);
+			CTriggerVPhysicsMotion *pTriggerVPhysicsMotion = dynamic_cast<CTriggerVPhysicsMotion *>(pEnt);
+			bool bBool = (pBaseTrigger != NULL) || (pTriggerVPhysicsMotion != NULL);
+			if (bBool && ((pBaseTrigger != NULL) ? !pBaseTrigger->m_bDisabled : !pTriggerVPhysicsMotion->m_bDisabled))
+			{
+				pEnt->RemoveEffects(EF_NODRAW);
+				if (pEnt->VPhysicsGetObject())
+				{
+					pEnt->VPhysicsGetObject()->EnableCollisions(true);
+				}
+				pEnt->RemoveSolidFlags(FSOLID_TRIGGER);
+				pEnt->RemoveSolidFlags(FSOLID_NOT_SOLID);
+				pEnt->PhysicsTouchTriggers();
+			}
+			pEnt = gEntList.NextEnt(pEnt);
+		}
+		//if we're still stuck, then we're probably in some HUGE triggers. just make them unsolid again
+		//500 is as far as i feel comfortable teleporting the player. HUGE triggers could make us teleport outside of entire buildings and such
+		while (!pPlayer->GetUnstuck(500, UF_NO_NODE_TELEPORT))
+		{
+			trace_t	trace;
+			UTIL_TraceEntity(pPlayer, pPlayer->GetAbsOrigin(), pPlayer->GetAbsOrigin(), MASK_PLAYERSOLID, &trace);
+			trace.m_pEnt->AddEffects(EF_NODRAW);
+			if (trace.m_pEnt->VPhysicsGetObject())
+			{
+				trace.m_pEnt->VPhysicsGetObject()->EnableCollisions(true);
+			}
+			CTriggerVPhysicsMotion *pTriggerVPhysicsMotion = dynamic_cast<CTriggerVPhysicsMotion *>(trace.m_pEnt);
+			if (!pTriggerVPhysicsMotion)//trigger_vphysics_motion doesn't use this according to a comment in CBaseVPhysicsTrigger::Spawn()
+				trace.m_pEnt->AddSolidFlags(FSOLID_TRIGGER);
+			trace.m_pEnt->AddSolidFlags(FSOLID_NOT_SOLID);
+			trace.m_pEnt->PhysicsTouchTriggers();
+		}
+	}
+	void StopEffect()
+	{
+		g_bEndSolidTriggers = true;
+		CBaseEntity *pEnt = gEntList.FirstEnt();
+		while (pEnt)
+		{
+			CBaseTrigger *pBaseTrigger = dynamic_cast<CBaseTrigger *>(pEnt);
+			CTriggerVPhysicsMotion *pTriggerVPhysicsMotion = dynamic_cast<CTriggerVPhysicsMotion *>(pEnt);
+			bool bBool = (pBaseTrigger != NULL) || (pTriggerVPhysicsMotion != NULL);
+			if (bBool && ((pBaseTrigger != NULL) ? !pBaseTrigger->m_bDisabled : !pTriggerVPhysicsMotion->m_bDisabled))
+			{
+				pEnt->AddEffects(EF_NODRAW);
+				if (pEnt->VPhysicsGetObject())
+				{
+					pEnt->VPhysicsGetObject()->EnableCollisions(true);
+				}
+				if (!pTriggerVPhysicsMotion)//trigger_vphysics_motion doesn't use this according to a comment in CBaseVPhysicsTrigger::Spawn()
+					pEnt->AddSolidFlags(FSOLID_TRIGGER);//TODO: this may also fix the crash related to the use of g_bEndSolidTriggers
+				pEnt->AddSolidFlags(FSOLID_NOT_SOLID);
+				pEnt->PhysicsTouchTriggers();
+			}
+			pEnt = gEntList.NextEnt(pEnt);
+		}
+		g_bEndSolidTriggers = false;
+	}
+	void LevelTransition()
+	{
+		StartEffect();
+	}
+END_EFFECT()
+
+BEGIN_EFFECT(EFFECT_RANDOM_COLORS, "Pretty Colors", random_colors, true)
+	void StartEffect()
+	{
+		CBaseEntity *pEnt = gEntList.FirstEnt();
+		while (pEnt)
+		{
+			if (pEnt->ClassMatches("env_fo*"))
+			{
+				//change fog!
+				variant_t colorVariant;
+				colorVariant.SetColor32(random->RandomInt(0, 255), random->RandomInt(0, 255), random->RandomInt(0, 255), pEnt->GetRenderColor().a);
+				pEnt->AcceptInput("SetColor", pEnt, pEnt, colorVariant, 0);
+				colorVariant.SetColor32(random->RandomInt(0, 255), random->RandomInt(0, 255), random->RandomInt(0, 255), pEnt->GetRenderColor().a);
+				pEnt->AcceptInput("SetColorSecondary", pEnt, pEnt, colorVariant, 0);
+			}
+			//doing it the input way allows us to hit beams and other things that have their own coloring process
+			char szcolor[2048];
+			variant_t colorVariant;
+			int r = random->RandomInt(0, 255);
+			int g = random->RandomInt(0, 255);
+			int b = random->RandomInt(0, 255);
+			Q_snprintf(szcolor, sizeof(szcolor), "%i %i %i", r, g, b);
+			Msg("%s\n", szcolor);
+			colorVariant.SetString(MAKE_STRING(szcolor));
+			pEnt->AcceptInput("Color", UTIL_GetLocalPlayer(), UTIL_GetLocalPlayer(), colorVariant, 0);
+			pEnt = gEntList.NextEnt(pEnt);
+		}
+	}
+	void Think()
+	{
+		CBaseEntity *pEnt = gEntList.FirstEnt();
+		while (pEnt)
+		{
+			//make sure we don't recolor things that we already colored. this aint a rave.
+			if (255 == pEnt->GetRenderColor().r == pEnt->GetRenderColor().g == pEnt->GetRenderColor().b)
+			{
+				//doing it the input way allows us to hit beams and other things that have their own coloring process
+				char szcolor[2048];
+				variant_t colorVariant;
+				int r = random->RandomInt(0, 255);
+				int g = random->RandomInt(0, 255);
+				int b = random->RandomInt(0, 255);
+				Q_snprintf(szcolor, sizeof(szcolor), "%i %i %i", r, g, b);
+				Msg("%s\n", szcolor);
+				colorVariant.SetString(MAKE_STRING(szcolor));
+				pEnt->AcceptInput("Color", UTIL_GetLocalPlayer(), UTIL_GetLocalPlayer(), colorVariant, 0);
+			}
+			pEnt = gEntList.NextEnt(pEnt);
+		}
+		SetNextThink(1.0f);
+	}
+END_EFFECT()
 
 DEFINE_EFFECT_SINGLEFIRE(EFFECT_BEER_BOTTLE, "Beer I owed ya", beer_bottle)
 {
